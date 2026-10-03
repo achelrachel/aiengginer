@@ -83,7 +83,7 @@ async def upload_document(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("upload_failed", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ingestion failed")
 
 
 @router.get(
@@ -193,7 +193,7 @@ async def query_knowledge_base(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("query_failed", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Query failed")
 
 
 @router.get("/health")
@@ -202,8 +202,8 @@ async def health_check():
     return HealthResponse(
         status="ok",
         version="1.0.0",
-        database="connected",
-        vector_store="connected",
-        llm_provider="available",
+        database="not_checked",
+        vector_store="not_checked",
+        llm_provider="not_checked",
         document_count=0,
     )

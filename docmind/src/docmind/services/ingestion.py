@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from sqlalchemy import select
+from docmind.retrieval.bm25 import get_bm25_storage
 from pathlib import Path
 from typing import Optional
 
@@ -50,7 +53,7 @@ class IngestionService:
         # Save file to secure path
         safe_path = secure_upload_path(original_filename)
         try:
-            content = await file.read()
+            content = await file.read(MAX_UPLOAD_SIZE + 1)
             if len(content) > MAX_UPLOAD_SIZE:
                 raise ValueError(f"File content size exceeds maximum")
             safe_path.write_bytes(content)
@@ -69,7 +72,7 @@ class IngestionService:
         ext = safe_path.suffix.lower().lstrip(".")
         file_type = ext
 
-        doc_id = None
+        document_id = str(uuid.uuid4())
         try:
             # Step 2: Parse document
             logger.info("parsing", filename=original_filename, path=str(safe_path))
@@ -81,7 +84,7 @@ class IngestionService:
             logger.info("parsed_success", chars=len(text), filename=original_filename)
 
             # Step 3: Chunk text
-            document_id = f"doc_{asyncio.get_event_loop().time()}_{original_filename[:20]}"
+
             chunks = chunk_text(text, document_id)
 
             if not chunks:
@@ -108,7 +111,7 @@ class IngestionService:
                     original_filename=original_filename,
                     file_size_bytes=len(content),
                     file_type=file_type,
-                    status="indexed",
+                    status="pending",
                     chunk_count=len(chunks),
                 )
                 session.add(doc)
@@ -130,7 +133,7 @@ class IngestionService:
                     session.add(chunk_obj)
 
                 await session.commit()
-                doc_id = document_id
+
                 logger.info("db_persisted", doc_id=document_id, chunks=len(chunks))
 
             # Store in vector database
@@ -150,7 +153,13 @@ class IngestionService:
                 )
                 for c in chunks
             ]
-            await vector_store.upsert_chunks(chunk_objects)
+            await vector_store.upsert_chunks(chunk_objects, embeddings)
+            async with get_session() as session:
+                stored_doc = await session.get(Document, document_id)
+                stored_doc.status = "indexed"
+                await session.commit()
+            doc.status = "indexed"
+            get_bm25_storage().get_index().add_documents([(c.id, c.text) for c in chunk_objects])
             logger.info("vector_stored", doc_id=document_id, chunks=len(chunks))
 
             return doc
@@ -158,16 +167,16 @@ class IngestionService:
         except Exception as e:
             logger.error("ingest_failed", filename=original_filename, error=str(e), exc_info=True)
             async with get_session() as session:
-                doc = Document(
-                    id=document_id or f"doc_failed_{original_filename[:20]}",
-                    filename=clean_filename(original_filename),
-                    original_filename=original_filename,
-                    file_size_bytes=len(content) if 'content' in dir() else 0,
-                    file_type=file_type,
-                    status="failed",
-                    error_message=str(e)[:2048],
-                )
-                session.add(doc)
+                doc = await session.get(Document, document_id)
+                if doc is None:
+                    doc = Document(
+                        id=document_id, filename=clean_filename(original_filename),
+                        original_filename=original_filename, file_size_bytes=len(content),
+                        file_type=file_type, status="failed",
+                    )
+                    session.add(doc)
+                doc.status = "failed"
+                doc.error_message = str(e)[:2048]
                 await session.commit()
             raise
         finally:
@@ -205,12 +214,15 @@ class IngestionService:
             doc = result.scalars().first()
             if not doc:
                 return False
+            chunk_ids = (await session.execute(select(Chunk.id).where(Chunk.document_id == doc_id))).scalars().all()
+            await get_vector_store().delete_document(doc_id)
             await session.delete(doc)
             await session.commit()
 
         # Remove from vector store
         vector_store = get_vector_store()
-        await vector_store.delete_document(doc_id)
+        for chunk_id in chunk_ids:
+            get_bm25_storage().get_index().remove_document(chunk_id)
 
         logger.info("document_deleted", doc_id=doc_id)
         return True

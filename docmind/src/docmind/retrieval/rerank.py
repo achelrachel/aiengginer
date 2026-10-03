@@ -81,6 +81,7 @@ async def retrieve_and_rerank(
     bm25_storage: BM25Storage,
     vector_results: List[Tuple[str, float, Dict[str, Any]]],
     top_k: int = 8,
+    allowed_ids: Optional[set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Full retrieval pipeline:
@@ -90,6 +91,19 @@ async def retrieve_and_rerank(
     """
     from docmind.retrieval.hybrid import hybrid_search
 
-    fused = hybrid_search(query, bm25_storage, vector_results, top_k=max(20, top_k * 3))
+    from docmind.retrieval.hybrid import reciprocal_rank_fusion
+    index = bm25_storage.get_index()
+    bm25_results = index.search(query, top_k=len(index))
+    if allowed_ids is not None:
+        bm25_results = [x for x in bm25_results if x[0] in allowed_ids]
+    fused = reciprocal_rank_fusion(bm25_results[:max(50, top_k * 5)], vector_results)
+    fused = fused[:max(20, top_k * 3)]
+    if fused:
+        stored = await get_vector_store().get_chunks(ids=[x["doc_id"] for x in fused])
+        metadata = {
+            chunk_id: {**(meta or {}), "text": text}
+            for chunk_id, text, meta in zip(stored["ids"], stored["documents"], stored["metadatas"])
+        }
+        fused = [{**x, "metadata": metadata[x["doc_id"]]} for x in fused if x["doc_id"] in metadata]
     reranked = await rerank_results(query, fused, top_k=top_k)
     return reranked

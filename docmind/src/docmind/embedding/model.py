@@ -6,7 +6,9 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 from docmind.config import settings
 from docmind.logging_config import get_logger
@@ -26,6 +28,7 @@ class Embedder:
     def model(self) -> SentenceTransformer:
         if self._model is None:
             logger.info("loading_embedding_model", model=self._model_name, device=self._device)
+            from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self._model_name, device=self._device)
             logger.info("embedding_model_loaded", model=self._model_name)
         return self._model

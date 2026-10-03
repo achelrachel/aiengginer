@@ -39,7 +39,8 @@ class BM25Index:
     def add_document(self, doc_id: str, text: str) -> None:
         """Add a document to the index."""
         self._documents[doc_id] = text
-        self._doc_ids.append(doc_id)
+        if doc_id not in self._documents or doc_id not in self._doc_ids:
+            self._doc_ids.append(doc_id)
         tokens = self._tokenize(text)
         self._doc_lengths[doc_id] = len(tokens)
         self._term_freqs[doc_id] = self._compute_term_freqs(tokens)
@@ -53,6 +54,13 @@ class BM25Index:
         """Batch add documents."""
         for doc_id, text in docs:
             self.add_document(doc_id, text)
+
+    def remove_document(self, chunk_id: str) -> None:
+        self._documents.pop(chunk_id, None)
+        self._term_freqs.pop(chunk_id, None)
+        self._doc_lengths.pop(chunk_id, None)
+        self._doc_ids = [x for x in self._doc_ids if x != chunk_id]
+        self._recompute_idf()
 
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization: lowercase, split on non-alphanumeric."""
@@ -174,8 +182,7 @@ class BM25Storage:
 
     def _load(self) -> None:
         """Load index from disk (simple implementation)."""
-        # For demo, we rebuild from scratch each time
-        # Production: serialize index to disk
+        # The authoritative index is rebuilt from SQLite at application startup.
         pass
 
     def save(self) -> None:

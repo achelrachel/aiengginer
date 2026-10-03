@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from docmind.config import settings
 from docmind.logging_config import get_logger
-from docmind.llm.schema import QueryAnswer, QueryAnswerSchema
+from docmind.llm.schema import QueryAnswer
 
 logger = get_logger("docmind.llm.prompt")
 

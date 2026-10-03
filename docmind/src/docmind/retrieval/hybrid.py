@@ -44,11 +44,13 @@ def reciprocal_rank_fusion(
         rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (k + rank)
 
     # Build result list
+    metadata_by_id = {doc_id: metadata for doc_id, _, metadata in vector_results}
     results = []
     for doc_id, rrf_score in rrf_scores.items():
         results.append({
             "doc_id": doc_id,
             "rrf_score": rrf_score,
+            "metadata": metadata_by_id.get(doc_id, {}),
         })
 
     # Sort by RRF score descending

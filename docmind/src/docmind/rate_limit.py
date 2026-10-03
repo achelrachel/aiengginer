@@ -18,7 +18,7 @@ logger = get_logger("docmind.rate_limit")
 
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=[f"{settings.rate_limit_requests}/{settings.rate_limit_window_seconds}"],
+    default_limits=[f"{settings.rate_limit_requests}/{settings.rate_limit_window_seconds} seconds"],
 )
 
 

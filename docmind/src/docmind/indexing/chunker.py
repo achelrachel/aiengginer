@@ -29,7 +29,7 @@ class Chunk:
 SECTION_PATTERNS = [
     re.compile(r"^(#+\s|={2,}\s|---\s|KALIMAT\s|Bagian\s|Bagian\s|Pasal\s|Artikel\s|Ayat\s|Point\s|\d+\.\s|[A-Z][a-z]+:\s)", re.MULTILINE),
     re.compile(r"\n#{1,3}\s+.+\n", re.MULTILINE),
-    re.compile(r"\n+{2,}\s*[A-Z][a-z]+:\s*.+\n", re.MULTILINE),
+    re.compile(r"\n{2,}\s*[A-Z][a-z]+:\s*.+\n", re.MULTILINE),
 ]
 
 
@@ -177,7 +177,8 @@ def chunk_text(text: str, document_id: str) -> list[Chunk]:
     strategy_chunks = structure_aware_split(text, document_id)
 
     # If structure-aware produced 0 chunks or too many (>100), fallback
-    if len(strategy_chunks) == 0 or len(strategy_chunks) > 100:
+    if (not strategy_chunks or len(strategy_chunks) > 100
+            or any(len(c.text) > settings.chunk_size_tokens * 4 for c in strategy_chunks)):
         logger.info("fallback_to_recursive", doc_id=document_id, reason=len(strategy_chunks))
         return recursive_character_split(text, document_id)
 

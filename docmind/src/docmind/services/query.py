@@ -116,6 +116,7 @@ class QueryService:
             bm25_storage=bm25_storage,
             vector_results=vector_list,
             top_k=top_k,
+            allowed_ids=set((await vector_store.get_chunks(where=filters))["ids"]) if filters else None,
         )
         metrics.record_stage("rerank")
         metrics.retrieval_count = len(retrieval_results)
@@ -128,23 +129,13 @@ class QueryService:
 
             # Get full chunk text from vector store
             chunk_text = metadata.get("text", "")
-            if not chunk_text:
-                # Fetch from vector store directly
-                chunk_info = await vector_store.query(
-                    query_embedding=query_embedding,
-                    top_k=1,
-                    where={"doc_id": doc_id},
-                    include=["documents"],
-                )
-                if chunk_info[1]:
-                    chunk_text = chunk_info[1][0]
 
             if chunk_text:
                 context_chunks.append({
                     "doc_id": doc_id,
                     "text": chunk_text,
                     "metadata": {
-                        "doc_id": doc_id,
+                        "doc_id": metadata.get("doc_id", doc_id),
                         "filename": metadata.get("filename", "unknown"),
                         "chunk_index": metadata.get("chunk_index", 0),
                         "similarity_score": result.get("combined_score", 0.0),
@@ -157,6 +148,15 @@ class QueryService:
             total_chars=sum(len(c["text"]) for c in context_chunks),
         )
         metrics.record_stage("context_build")
+
+        retrieval_latency_ms = round((time.monotonic() - t0) * 1000, 2)
+        if not context_chunks:
+            return {
+                "answer": "Tidak ada sumber yang sesuai dalam basis pengetahuan.",
+                "answer_status": "refused", "citations": [],
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "total_latency_ms": retrieval_latency_ms,
+            }
 
         # Step 8: LLM generation
         llm_client = get_llm_client()
@@ -183,7 +183,7 @@ class QueryService:
                 "answer": "Maaf, terjadi kesalahan saat memproses pertanyaan. Silakan coba lagi.",
                 "answer_status": "refused",
                 "citations": [],
-                "error": str(e),
+
                 "retrieval_latency_ms": round((time.monotonic() - t0) * 1000, 2),
                 "llm_latency_ms": None,
                 "total_latency_ms": round((time.monotonic() - t0) * 1000, 2),
@@ -220,7 +220,17 @@ class QueryService:
 
         # Step 10: Build final response
         citations = []
+        sources = {
+            (c["metadata"]["doc_id"], c["metadata"]["chunk_index"]): c
+            for c in context_chunks
+        }
+        invalid_citation = False
         for cit in parsed.citations:
+            source = sources.get((cit.doc_id, cit.chunk_index))
+            if (not source or cit.filename != source["metadata"]["filename"]
+                    or not cit.excerpt.strip() or cit.excerpt not in source["text"]):
+                invalid_citation = True
+                break
             citations.append({
                 "doc_id": cit.doc_id,
                 "filename": cit.filename,
@@ -229,21 +239,22 @@ class QueryService:
                 "similarity_score": cit.similarity_score,
             })
 
+        if invalid_citation or (parsed.answer_status.value != "refused" and not citations):
+            parsed = QueryAnswer(
+                answer="Jawaban tidak dapat diverifikasi terhadap sumber yang tersedia.",
+                answer_status="refused", citations=[],
+            )
+            citations = []
+
         total_latency = (time.monotonic() - t0) * 1000
 
-        # Estimate cost (approximate: $0.0001 per 1K input tokens, $0.0002 per 1K output)
-        estimated_cost = None
-        if response.input_tokens and response.output_tokens:
-            estimated_cost = (
-                response.input_tokens * 0.0001 / 1000 +
-                response.output_tokens * 0.0002 / 1000
-            )
+        estimated_cost = None  # Provider pricing is not configured.
 
         response_data = {
             "answer": parsed.answer,
             "answer_status": parsed.answer_status.value,
             "citations": citations,
-            "retrieval_latency_ms": round(metrics.stages.get("validation", 0) * 1000, 2),
+            "retrieval_latency_ms": retrieval_latency_ms,
             "llm_latency_ms": round(response.latency_ms or 0, 2),
             "total_latency_ms": round(total_latency, 2),
             "input_tokens": response.input_tokens,
@@ -256,7 +267,7 @@ class QueryService:
             query=query,
             response_data=response_data,
             retrieval_count=metrics.retrieval_count,
-            retrieval_latency_ms=round((time.monotonic() - t0) * 1000, 2),
+            retrieval_latency_ms=retrieval_latency_ms,
             llm_latency_ms=response.latency_ms,
         )
 

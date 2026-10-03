@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     def ensure_dirs(cls, v: Path) -> Path:
         v.mkdir(parents=True, exist_ok=True)
         return v
+
+    @model_validator(mode="after")
+    def validate_security_and_chunking(self):
+        if not self.api_key.strip() or (self.is_production() and self.api_key == "dev-key-change-me"):
+            raise ValueError("Set a non-default API_KEY before production use")
+        if self.chunk_size_tokens <= 0 or not 0 <= self.chunk_overlap_tokens < self.chunk_size_tokens:
+            raise ValueError("Chunk overlap must be smaller than the positive chunk size")
+        return self
 
     def is_production(self) -> bool:
         return self.app_env.strip().lower() == "production"

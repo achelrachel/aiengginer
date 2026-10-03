@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from typing import Optional
 import uuid
 
-from sqlalchemy import BigInteger, String
+from contextlib import asynccontextmanager
+from sqlalchemy import BigInteger, String, DateTime, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -54,10 +55,10 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(BigInteger, nullable=False)
     text: Mapped[str] = mapped_column(String(8192), nullable=False)
-    metadata: Mapped[str] = mapped_column(String(2048), nullable=False, default="{}")
+    metadata_json: Mapped[str] = mapped_column(String(2048), nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     document = relationship("Document", back_populates="chunks")
@@ -66,14 +67,14 @@ class Chunk(Base):
     def metadata_dict(self) -> dict:
         import json
         try:
-            return json.loads(self.metadata)
+            return json.loads(self.metadata_json)
         except Exception:
             return {}
 
     @metadata_dict.setter
     def metadata_dict(self, value: dict) -> None:
         import json
-        self.metadata = json.dumps(value, ensure_ascii=False)
+        self.metadata_json = json.dumps(value, ensure_ascii=False)
 
 
 class QueryAudit(Base):
@@ -86,12 +87,12 @@ class QueryAudit(Base):
     response_text: Mapped[str] = mapped_column(String(8192), nullable=False)
     answer_status: Mapped[str] = mapped_column(String(32), nullable=False)
     retrieval_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    retrieval_latency_ms: Mapped[Optional[float]] = mapped_column(BigInteger, nullable=True)
-    llm_latency_ms: Mapped[Optional[float]] = mapped_column(BigInteger, nullable=True)
-    total_latency_ms: Mapped[Optional[float]] = mapped_column(BigInteger, nullable=True)
+    retrieval_latency_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    llm_latency_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    total_latency_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     input_tokens: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     output_tokens: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    estimated_cost_usd: Mapped[Optional[float]] = mapped_column(BigInteger, nullable=True)
+    estimated_cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     def to_public_dict(self) -> dict:
@@ -147,7 +148,8 @@ class Engine:
 _engine = Engine()
 
 
-async def get_session() -> AsyncSession:
+@asynccontextmanager
+async def get_session():
     """Yield an async session for dependency injection."""
     factory = _engine.get_session_factory()
     async with factory() as session:
@@ -162,7 +164,3 @@ async def init_db():
     """Create all tables."""
     async with _engine.get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-
-# Runtime type decorator for DateTime
-from datetime import DateTime

@@ -1,122 +1,91 @@
-"""
-ChromaDB vector database client.
-"""
+"""Persistent Chroma storage using the same embeddings as query retrieval."""
 from __future__ import annotations
 
-import json
-import logging
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+import asyncio
+from typing import Any
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from chromadb.api import ChromaBackendAPI
-from chromadb.api.client import ChromaClient
 
 from docmind.config import settings
-from docmind.db.models import Chunk
-from docmind.logging_config import get_logger
-
-logger = get_logger("docmind.vectorstore")
 
 
 class VectorStore:
-    """Wrapper around ChromaDB for document chunk storage and retrieval."""
-
-    def __init__(self, client: Optional[ChromaClient] = None):
+    def __init__(self, client=None):
         self._client = client
-        self._collection: Optional[chromadb.Collection] = None
-        self._collection_name = "docmind_chunks"
+        self._collection = None
 
     @property
-    def client(self) -> ChromaClient:
+    def client(self):
         if self._client is None:
-            chroma_settings = ChromaSettings(
-                persist_directory=str(settings.chroma_db_dir),
-                anonymized_telemetry=False,
+            self._client = chromadb.PersistentClient(
+                path=str(settings.chroma_db_dir),
+                settings=ChromaSettings(anonymized_telemetry=False),
             )
-            self._client = chromadb.Client(chroma_settings)
         return self._client
 
     @property
-    def collection(self) -> chromadb.Collection:
+    def collection(self):
         if self._collection is None:
             self._collection = self.client.get_or_create_collection(
-                name=self._collection_name,
-                metadata={"hnsw:space": "cosine"},
+                name="docmind_chunks", metadata={"hnsw:space": "cosine"},
+                embedding_function=None,
             )
         return self._collection
 
-    async def upsert_chunks(self, chunks: List[Chunk]) -> None:
-        """Insert or update chunks in the vector store asynchronously."""
+    async def upsert_chunks(self, chunks, embeddings):
         if not chunks:
             return
-
-        ids = [c.id for c in chunks]
-        texts = [c.text for c in chunks]
-        metadatas = [c.metadata_dict for c in chunks]
-
-        self.collection.add(
-            ids=ids,
-            documents=texts,
-            metadatas=metadatas,
+        if len(chunks) != len(embeddings):
+            raise ValueError("Every chunk requires an embedding")
+        await asyncio.to_thread(
+            self.collection.upsert,
+            ids=[c.id for c in chunks],
+            documents=[c.text for c in chunks],
+            metadatas=[c.metadata_dict for c in chunks],
+            embeddings=embeddings,
         )
 
-        logger.info("upserted_chunks", count=len(chunks), doc_ids=ids[:10])
+    async def delete_document(self, doc_id):
+        await asyncio.to_thread(self.collection.delete, where={"doc_id": doc_id})
 
-    async def delete_document(self, doc_id: str) -> None:
-        """Remove all chunks for a document."""
-        result = self.collection.get(where={"document_id": doc_id}, include=["ids"])
-        if result["ids"]:
-            self.collection.delete(ids=result["ids"])
-            logger.info("deleted_doc_chunks", doc_id=doc_id, count=len(result["ids"]))
-
-    async def query(
-        self,
-        query_embedding: List[float],
-        top_k: int = 10,
-        where: Optional[Dict[str, Any]] = None,
-        include: List[str] = ["documents", "metadatas", "distances"],
-    ) -> Tuple[List[str], List[str], List[Dict[str, Any]], List[float]]:
-        """Query the vector store and return ids, documents, metadatas, distances."""
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where=where,
-            include=include,
+    async def get_chunks(self, ids=None, where=None):
+        return await asyncio.to_thread(
+            self.collection.get, ids=ids, where=where, include=["documents", "metadatas"]
         )
 
-        ids = results["ids"][0] if results["ids"] else []
-        docs = results["documents"][0] if results["documents"] else []
-        metadatas = results["metadatas"][0] if results["metadatas"] else []
-        distances = results["distances"][0] if results["distances"] else []
+    async def query(self, query_embedding, top_k=10, where=None, include=None):
+        count = await self.count()
+        if count == 0:
+            return [], [], [], []
+        results = await asyncio.to_thread(
+            self.collection.query, query_embeddings=[query_embedding],
+            n_results=min(top_k, count), where=where,
+            include=include or ["documents", "metadatas", "distances"],
+        )
+        def first(key):
+            rows = results.get(key)
+            return rows[0] if rows else []
+        return first("ids"), first("documents"), first("metadatas"), first("distances")
 
-        return ids, docs, metadatas, distances
+    async def count(self):
+        return await asyncio.to_thread(self.collection.count)
 
-    async def count(self) -> int:
-        """Return total number of chunks in the collection."""
-        return self.collection.count()
-
-    async def clean(self) -> None:
-        """Delete the collection and recreate it."""
-        try:
-            self.client.delete_collection(self._collection_name)
-        except Exception:
-            pass
+    async def clean(self):
+        await asyncio.to_thread(self.client.delete_collection, "docmind_chunks")
         self._collection = None
-        logger.info("vector_store_cleaned")
 
 
-_default_store: Optional[VectorStore] = None
+_default_store = None
 
 
-def get_vector_store() -> VectorStore:
+def get_vector_store():
     global _default_store
     if _default_store is None:
         _default_store = VectorStore()
     return _default_store
 
 
-def reset_vector_store() -> None:
+def reset_vector_store():
     global _default_store
     _default_store = None

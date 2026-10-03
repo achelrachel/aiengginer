@@ -52,7 +52,7 @@ class LLMClient:
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self.base_url,
+                base_url=self.base_url.rstrip("/") + "/",
                 timeout=self.timeout,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
@@ -87,10 +87,10 @@ class LLMClient:
         }
 
         if response_format:
-            payload["response_format"] = response_format
+            payload["response_format"] = {"type": "json_schema", "json_schema": response_format}
 
         try:
-            response = await self.client.post("/chat/completions", json=payload)
+            response = await self.client.post("v1/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
 
@@ -144,9 +144,9 @@ class LLMClient:
             "stream": True,
         }
         if response_format:
-            payload["response_format"] = response_format
+            payload["response_format"] = {"type": "json_schema", "json_schema": response_format}
 
-        async with self.client.stream("POST", "/chat/completions", json=payload) as response:
+        async with self.client.stream("POST", "v1/chat/completions", json=payload) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: "):

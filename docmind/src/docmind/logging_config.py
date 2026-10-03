@@ -4,6 +4,7 @@ Structured JSON logging configuration.
 from __future__ import annotations
 
 import logging
+import logging.config
 import sys
 from typing import Any
 
@@ -15,6 +16,8 @@ from docmind.config import settings
 def configure_logging() -> None:
     """Configure structured logging once at startup."""
     shared_ancestor = {
+        "version": 1,
+        "disable_existing_loggers": False,
         "formatters": {
             "json": {
                 "()": structlog.stdlib.ProcessorFormatter,

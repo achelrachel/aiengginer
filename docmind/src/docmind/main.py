@@ -17,7 +17,7 @@ from docmind.config import settings
 from docmind.logging_config import configure_logging, get_logger
 from docmind.db.models import init_db, close_db
 from docmind.rate_limit import setup_rate_limit
-from docmind.api.routes import api_router
+from docmind.api.routes import router as api_router
 
 logger = get_logger("docmind.main")
 
@@ -28,12 +28,24 @@ async def lifespan(app: FastAPI):
     configure_logging()
     logger.info("startup", env=settings.app_env, debug=settings.debug)
     await init_db()
+    from sqlalchemy import select
+    from docmind.db.models import Chunk, Document, get_session
+    from docmind.retrieval.bm25 import get_bm25_storage
+    async with get_session() as session:
+        rows = (await session.execute(
+            select(Chunk.id, Chunk.text).join(Document).where(Document.status == "indexed")
+        )).all()
+    get_bm25_storage().get_index().add_documents(list(rows))
     setup_rate_limit(app)
     logger.info("startup_complete")
-    yield
-    logger.info("shutdown_started")
-    await close_db()
-    logger.info("shutdown_complete")
+    try:
+        yield
+    finally:
+        from docmind.llm.client import get_llm_client
+        await get_llm_client().close()
+        logger.info("shutdown_started")
+        await close_db()
+        logger.info("shutdown_complete")
 
 
 app = FastAPI(
@@ -52,7 +64,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -75,9 +87,7 @@ async def health_check():
     return {
         "status": "ok",
         "version": "1.0.0",
-        "database": "connected",
-        "vector_store": "connected",
-        "llm_provider": "available",
+        "check": "liveness",
     }
 
 

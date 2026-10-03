@@ -111,7 +111,7 @@ def validate_file_type(file_path: Path) -> tuple[bool, str]:
     Returns (is_valid, reason).
     """
     ext = file_path.suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext.lstrip(".") not in ALLOWED_EXTENSIONS:
         return False, f"Extension '{ext}' not allowed"
 
     if ext in MAGIC_BYTES:
@@ -134,7 +134,7 @@ def secure_upload_path(filename: str) -> Path:
     Uses UUID-based naming to prevent path traversal.
     """
     ext = Path(filename).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext.lstrip(".") not in ALLOWED_EXTENSIONS:
         ext = ".tmp"
     safe_name = f"{uuid.uuid4()}{ext}"
     return settings.upload_dir / safe_name
@@ -147,7 +147,7 @@ def is_safe_path(path: Path, base: Path) -> bool:
     try:
         resolved = path.resolve()
         base_resolved = base.resolve()
-        return str(resolved).startswith(str(base_resolved))
+        return resolved.is_relative_to(base_resolved)
     except Exception:
         return False
 

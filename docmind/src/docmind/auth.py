@@ -3,6 +3,7 @@ API key authentication.
 """
 from __future__ import annotations
 
+import secrets
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Security, status
@@ -36,7 +37,7 @@ async def get_api_key(
             headers={"WWW-Authenticate": "ApiKey"},
         )
 
-    if key != settings.api_key:
+    if not secrets.compare_digest(key.encode(), settings.api_key.encode()):
         logger.warning("invalid_api_key_attempt", client=request.client.host if request.client else "unknown")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
