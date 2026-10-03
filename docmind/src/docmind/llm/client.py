@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from docmind.config import settings
+from docmind.llm.provider import resolve_provider, normalize_base_url
 from docmind.logging_config import get_logger
 
 logger = get_logger("docmind.llm.client")
@@ -41,9 +42,12 @@ class LLMClient:
         timeout_seconds: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ):
-        self.base_url = base_url or settings.ollama_base_url
-        self.model = model or settings.ollama_model
-        self.api_key = api_key or "ollama"  # Ollama doesn't require real key
+        provider = resolve_provider(settings)
+        self.base_url = normalize_base_url(base_url, allow_local_http=True) if base_url else provider.base_url
+        self.model = model or provider.model
+        self.api_key = api_key or provider.api_key
+        self.token_parameter = provider.token_parameter
+        self.output_mode = provider.output_mode
         self.timeout = timeout_seconds or settings.llm_timeout_seconds
         self.max_tokens = max_tokens or settings.llm_max_tokens
         self._client: Optional[httpx.AsyncClient] = None
@@ -70,7 +74,7 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         response_format: Optional[Dict[str, Any]] = None,
-        temperature: float = 0.3,
+        temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> LLMResponse:
         """
@@ -82,21 +86,30 @@ class LLMClient:
         payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens or self.max_tokens,
+            self.token_parameter: max_tokens or self.max_tokens,
         }
 
+        effective_temperature = temperature if temperature is not None else settings.llm_temperature
+        if effective_temperature is not None:
+            payload["temperature"] = effective_temperature
         if response_format:
-            payload["response_format"] = {"type": "json_schema", "json_schema": response_format}
+            payload["response_format"] = (
+                {"type": "json_schema", "json_schema": response_format}
+                if self.output_mode == "json_schema" else {"type": "json_object"}
+            )
 
         try:
-            response = await self.client.post("v1/chat/completions", json=payload)
+            response = await self.client.post("chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
 
             choice = data["choices"][0]
             message = choice["message"]
-            content = message.get("content", "")
+            if choice.get("finish_reason") in {"length", "content_filter"} or message.get("refusal"):
+                raise ValueError("LLM response was truncated or refused")
+            content = message.get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("LLM returned no text content")
 
             usage = data.get("usage", {})
             input_tokens = usage.get("prompt_tokens")
@@ -124,32 +137,40 @@ class LLMClient:
             logger.error("llm_timeout", model=self.model, latency_ms=round((time.monotonic() - start) * 1000, 2))
             raise
         except httpx.HTTPStatusError as e:
-            logger.error("llm_http_error", status=e.response.status_code, body=e.response.text[:500])
+            logger.error("llm_http_error", status=e.response.status_code)
             raise
         except Exception as e:
-            logger.error("llm_error", error=str(e), exc_info=True)
+            logger.error("llm_error", error_type=type(e).__name__)
             raise
 
     async def chat_completion_stream(
         self,
         messages: List[Dict[str, str]],
         response_format: Optional[Dict[str, Any]] = None,
-        temperature: float = 0.3,
+        temperature: Optional[float] = None,
     ):
         """Stream chat completion (for future use)."""
         payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
             "stream": True,
+            self.token_parameter: self.max_tokens,
         }
+        effective_temperature = temperature if temperature is not None else settings.llm_temperature
+        if effective_temperature is not None:
+            payload["temperature"] = effective_temperature
         if response_format:
-            payload["response_format"] = {"type": "json_schema", "json_schema": response_format}
+            payload["response_format"] = (
+                {"type": "json_schema", "json_schema": response_format}
+                if self.output_mode == "json_schema" else {"type": "json_object"}
+            )
 
-        async with self.client.stream("POST", "v1/chat/completions", json=payload) as response:
+        async with self.client.stream("POST", "chat/completions", json=payload) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
+                    if line[6:].strip() == "[DONE]":
+                        break
                     yield line[6:]
 
 
@@ -169,3 +190,11 @@ def reset_llm_client() -> None:
         import asyncio
         asyncio.run(_default_client.close())
     _default_client = None
+
+
+async def close_llm_client() -> None:
+    """Close an existing client without resolving unconfigured provider settings."""
+    global _default_client
+    if _default_client is not None:
+        await _default_client.close()
+        _default_client = None

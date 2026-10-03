@@ -148,7 +148,7 @@ async def test_llm_endpoint_and_schema():
         assert payload['response_format']['json_schema']['name'] == 'query_answer'
         return httpx.Response(200, json={'choices': [{'message': {'content': '{}'}}]})
     llm = LLMClient()
-    llm._client = httpx.AsyncClient(base_url='http://localhost:11434/', transport=httpx.MockTransport(handle))
+    llm._client = httpx.AsyncClient(base_url='http://localhost:11434/v1/', transport=httpx.MockTransport(handle))
     assert (await llm.chat_completion([], response_format=QUERY_ANSWER_SCHEMA)).content == '{}'
     await llm.close()
 

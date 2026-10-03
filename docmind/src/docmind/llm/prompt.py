@@ -38,7 +38,6 @@ Output harus mengikuti format JSON yang telah ditentukan:
 - answer: jawaban teks (minimal 1 karakter)
 - answer_status: "answered" / "refused" / "partial"
 - citations: array dari objek citation (doc_id, filename, chunk_index, excerpt, similarity_score)
-- thought: reasoning internal (opsional)
 
 Output harus VALID JSON, tidak boleh ada teks di luar JSON.
 </format>

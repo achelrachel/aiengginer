@@ -41,8 +41,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        from docmind.llm.client import get_llm_client
-        await get_llm_client().close()
+        from docmind.llm.client import close_llm_client
+        await close_llm_client()
         logger.info("shutdown_started")
         await close_db()
         logger.info("shutdown_complete")

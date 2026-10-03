@@ -92,13 +92,11 @@ QUERY_ANSWER_SCHEMA = {
                         "similarity_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                     },
                     "required": ["doc_id", "filename", "chunk_index", "excerpt", "similarity_score"],
+                    "additionalProperties": False,
                 },
                 "description": "List of citations supporting the answer.",
             },
-            "thought": {
-                "type": "string",
-                "description": "Internal reasoning.",
-            },
+
         },
         "required": ["answer", "answer_status", "citations"],
         "additionalProperties": False,

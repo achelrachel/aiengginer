@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import SecretStr, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,8 +47,18 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="qwen2.5:7b", alias="OLLAMA_MODEL")
-    llm_timeout_seconds: float = Field(default=30.0, alias="LLM_TIMEOUT_SECONDS")
-    llm_max_tokens: int = Field(default=1024, alias="LLM_MAX_TOKENS")
+    llm_provider: Literal["ollama", "openai", "xai", "compatible"] = Field(default="ollama", alias="LLM_PROVIDER")
+    llm_base_url: Optional[str] = Field(default=None, alias="LLM_BASE_URL")
+    llm_model: Optional[str] = Field(default=None, alias="LLM_MODEL")
+    llm_api_key: SecretStr = Field(default=SecretStr(""), alias="LLM_API_KEY")
+    openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
+    xai_api_key: SecretStr = Field(default=SecretStr(""), alias="XAI_API_KEY")
+    llm_token_parameter: Literal["max_tokens", "max_completion_tokens"] | None = Field(default=None, alias="LLM_TOKEN_PARAMETER")
+    llm_temperature: Optional[float] = Field(default=None, ge=0, le=2, alias="LLM_TEMPERATURE")
+    llm_output_mode: Literal["json_schema", "json_object"] = Field(default="json_schema", alias="LLM_OUTPUT_MODE")
+
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
+    llm_max_tokens: int = Field(default=1024, ge=1, alias="LLM_MAX_TOKENS")
 
     bm25_top_k: int = Field(default=50, alias="BM25_TOP_K")
     vector_top_k: int = Field(default=50, alias="VECTOR_TOP_K")

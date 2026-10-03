@@ -173,7 +173,6 @@ class QueryService:
             response = await llm_client.chat_completion(
                 messages=messages,
                 response_format=QUERY_ANSWER_SCHEMA,
-                temperature=0.3,
                 max_tokens=settings.llm_max_tokens,
             )
         except Exception as e:
