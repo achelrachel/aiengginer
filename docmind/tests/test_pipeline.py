@@ -300,3 +300,24 @@ def test_query_accepts_document_id_metadata_filter():
     })
     assert parsed.query == "bagaimana lapor insiden?"
     assert parsed.filters == {"doc_id": "doc-42"}
+
+
+def test_readiness_checks_durable_database_and_vector_storage(client):
+    result = client.get("/ready")
+    assert result.status_code == 200, result.text
+    assert result.json() == {"status": "ready", "database": "ok",
+                             "vector_store": "ok", "llm_provider": "not_verified"}
+
+
+def test_readiness_fails_closed_without_leaking_dependency_error(client, monkeypatch):
+    from docmind.vectorstore.client import get_vector_store
+
+    async def storage_unavailable():
+        raise RuntimeError("sensitive connection details must stay private")
+
+    monkeypatch.setattr(get_vector_store(), "count", storage_unavailable)
+    result = client.get("/ready")
+    assert result.status_code == 503
+    assert result.json() == {"status": "not_ready", "code": "DEPENDENCY_UNAVAILABLE"}
+    assert "sensitive" not in result.text
+    assert client.get("/health").status_code == 200
