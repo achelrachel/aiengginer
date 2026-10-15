@@ -321,3 +321,29 @@ def test_readiness_fails_closed_without_leaking_dependency_error(client, monkeyp
     assert result.json() == {"status": "not_ready", "code": "DEPENDENCY_UNAVAILABLE"}
     assert "sensitive" not in result.text
     assert client.get("/health").status_code == 200
+
+
+def test_document_list_uses_stable_paginated_results(client):
+    before = client.get('/api/v1/documents', headers=HEADERS)
+    assert before.status_code == 200
+    initial_total = before.json()['total']
+    uploaded = []
+    for i in range(3):
+        response = client.post('/api/v1/documents/upload', headers=HEADERS,
+            files={'file': (f'pagination-{i}.txt', f'Text of pagination document number {i} with enough words.', 'text/plain')})
+        assert response.status_code == 200, response.text
+        uploaded.append(response.json()['id'])
+    try:
+        page_one = client.get('/api/v1/documents?page=1&page_size=2', headers=HEADERS)
+        page_two = client.get('/api/v1/documents?page=2&page_size=2', headers=HEADERS)
+        assert page_one.status_code == 200 and page_two.status_code == 200
+        assert page_one.json()['total'] == initial_total + 3
+        assert page_two.json()['total'] == initial_total + 3
+        assert len(page_one.json()['documents']) == 2
+        assert len(page_two.json()['documents']) <= 2
+        first_ids = {item['id'] for item in page_one.json()['documents']}
+        second_ids = {item['id'] for item in page_two.json()['documents']}
+        assert not first_ids.intersection(second_ids)
+    finally:
+        for doc_id in uploaded:
+            assert client.delete(f'/api/v1/documents/{doc_id}', headers=HEADERS).status_code == 200
