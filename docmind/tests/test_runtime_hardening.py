@@ -83,3 +83,21 @@ def test_rate_limited_http_response_uses_numeric_retry_after():
     assert int(response.headers["retry-after"]) >= max(60, settings.rate_limit_window_seconds)
     assert b'"retry_after_seconds"' in response.body
     assert b'"retry_after":"10 per 1 minute"' in response.body
+
+
+def test_ingestion_logs_do_not_interpolate_user_document_names_or_temporary_paths():
+    """Prevent accidental sensitive filename/path leakage into production logs."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "docmind"
+    for path in (root / "api" / "routes.py", root / "services" / "ingestion.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if not isinstance(node.func.value, ast.Name) or node.func.value.id != "logger":
+                continue
+            assert all(k.arg not in {"filename", "path"} for k in node.keywords), (path, node.lineno)
