@@ -249,3 +249,31 @@ def test_new_lifespan_discards_stale_keyword_index_entries(monkeypatch):
     monkeypatch.setattr(model, '_default_embedder', DeterministicEmbedder())
     with TestClient(app):
         assert not get_bm25_storage().get_index().search('orphankeywordnameddoc')
+
+
+def test_bm25_batch_matches_individual_updates_and_rebuilds_once(monkeypatch):
+    corpus = [(f"chunk-{i}", f"common token{i} a repeated term") for i in range(150)]
+    expected = BM25Index()
+    for chunk_id, text in corpus:
+        expected.add_document(chunk_id, text)
+
+    batched = BM25Index()
+    original_recompute = batched._recompute_idf
+    called = []
+
+    def observed_recompute():
+        called.append(True)
+        original_recompute()
+
+    monkeypatch.setattr(batched, '_recompute_idf', observed_recompute)
+    batched.add_documents(corpus)
+    assert len(called) == 1
+    assert batched.document_count() == expected.document_count()
+    assert batched.search('common repeated', top_k=10) == expected.search(
+        'common repeated', top_k=10,
+    )
+
+    batched.add_documents([('chunk-4', 'replaced distinctterm')])
+    assert batched.document_count() == len(corpus)
+    assert batched.search('distinctterm', top_k=10)[0][0] == 'chunk-4'
+    assert len(called) == 2
