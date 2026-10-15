@@ -4,11 +4,11 @@ Returns extracted text with basic metadata.
 """
 from __future__ import annotations
 
-import logging
+from docmind.logging_config import get_logger
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("docmind.indexing.parser")
+logger = get_logger("docmind.indexing.parser")
 
 
 def parse_txt(path: Path) -> str:
