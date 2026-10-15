@@ -178,7 +178,8 @@ async def query_knowledge_base(
     bind_request_context(request_id, method="POST", path="/api/v1/query")
 
     metrics = Metrics(request_id=request_id)
-    logger.info("query_started", query_preview=body.query[:100], request_id=request_id)
+    # Questions can contain private document contents; log length, not the question.
+    logger.info("query_started", query_length=len(body.query), request_id=request_id)
 
     try:
         result = await query_service.query(

@@ -5,6 +5,7 @@ Semua setting dibaca dari environment variables.
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Optional, Literal
 
@@ -27,11 +28,12 @@ class Settings(BaseSettings):
     app_port: int = Field(default=8000, alias="APP_PORT")
 
     api_key: str = Field(default="dev-key-change-me", alias="API_KEY")
+    cors_allowed_origins: str = Field(default="", alias="CORS_ALLOWED_ORIGINS")
 
-    rate_limit_requests: int = Field(default=60, alias="RATE_LIMIT_REQUESTS")
-    rate_limit_window_seconds: int = Field(default=60, alias="RATE_LIMIT_WINDOW_SECONDS")
+    rate_limit_requests: int = Field(default=60, ge=6, alias="RATE_LIMIT_REQUESTS")
+    rate_limit_window_seconds: int = Field(default=60, ge=1, alias="RATE_LIMIT_WINDOW_SECONDS")
 
-    max_upload_size_mb: int = Field(default=10, alias="MAX_UPLOAD_SIZE_MB")
+    max_upload_size_mb: int = Field(default=10, ge=1, alias="MAX_UPLOAD_SIZE_MB")
     allowed_extensions: list[str] = Field(
         default=["pdf", "txt", "md", "docx", "pptx"],
         alias="ALLOWED_EXTENSIONS",
@@ -87,10 +89,39 @@ class Settings(BaseSettings):
         v.mkdir(parents=True, exist_ok=True)
         return v
 
+    def cors_origins(self) -> list[str]:
+        # Explicit browser origins only. Empty means same-origin (no CORS grants).
+        return [value.strip() for value in self.cors_allowed_origins.split(",") if value.strip()]
+
     @model_validator(mode="after")
     def validate_security_and_chunking(self):
         if not self.api_key.strip() or (self.is_production() and self.api_key == "dev-key-change-me"):
             raise ValueError("Set a non-default API_KEY before production use")
+        origins = self.cors_origins()
+        if len(origins) > 16 or len(set(origins)) != len(origins):
+            raise ValueError("CORS origins must be unique and limited to 16")
+        for origin in origins:
+            if origin == "*":
+                if self.is_production():
+                    raise ValueError("Wildcard CORS origins are forbidden in production")
+                continue
+            try:
+                parsed = urlsplit(origin)
+                valid = (
+                    bool(parsed.hostname)
+                    and parsed.scheme in {"http", "https"}
+                    and parsed.username is None and parsed.password is None
+                    and parsed.path == "" and not parsed.query and not parsed.fragment
+                    and parsed.port != 0
+                )
+                if self.is_production() and parsed.scheme != "https":
+                    valid = False
+                if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                    valid = False
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError("CORS_ALLOWED_ORIGINS contains an unsafe or invalid origin")
         if self.chunk_size_tokens <= 0 or not 0 <= self.chunk_overlap_tokens < self.chunk_size_tokens:
             raise ValueError("Chunk overlap must be smaller than the positive chunk size")
         return self

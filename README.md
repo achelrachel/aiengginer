@@ -36,7 +36,9 @@ The shell variable `API_KEY` must match the value in `.env`; copying the file al
 - Rebuild BM25 from indexed database chunks at startup, update after ingestion, and remove entries when documents are deleted.
 - Apply metadata filters to both dense and keyword candidates before reranking.
 - Return structured answers, source citations, query audit records, token usage when provided, and measured processing latency. Monetary cost is unset because provider pricing is not configured.
-- Protect document/query endpoints with API-key authentication and rate limits. Production configuration rejects the development default key.
+- Protect document/query endpoints with API-key authentication and rate limits.
+- Browser cross-origin access is denied by default. Set `CORS_ALLOWED_ORIGINS` to an explicit comma-separated HTTPS origin allowlist when a separate frontend is deployed. Wildcards and unsafe origins are forbidden in production; direct API clients such as curl are unaffected.
+- Query audit logs record question length and request ID, not raw question previews. Production configuration rejects the development default key.
 - `/health` is a liveness check. It does not certify database, vector-store, or model availability.
 
 ## Tests
