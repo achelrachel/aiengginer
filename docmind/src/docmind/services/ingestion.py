@@ -183,6 +183,11 @@ class IngestionService:
             logger.error("ingest_failed", doc_id=document_id,
                          error_type=type(e).__name__)
             async with get_session() as session:
+                # The metadata commit precedes the vector upsert. If the
+                # vector write fails, remove committed SQL chunks as well as
+                # the compensated Chroma/BM25 entries.
+                from sqlalchemy import delete
+                await session.execute(delete(Chunk).where(Chunk.document_id == document_id))
                 doc = await session.get(Document, document_id)
                 if doc is None:
                     doc = Document(
@@ -192,6 +197,7 @@ class IngestionService:
                     )
                     session.add(doc)
                 doc.status = "failed"
+                doc.chunk_count = 0
                 doc.error_message = "INGESTION_FAILED_" + type(e).__name__[:64]
                 await session.commit()
             raise
