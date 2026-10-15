@@ -28,6 +28,25 @@ class QueryRequest(BaseModel):
     def normalize_query(cls, v: str) -> str:
         return v.strip()
 
+    @field_validator("filters")
+    @classmethod
+    def validate_metadata_filters(cls, value: Optional[dict]) -> Optional[dict]:
+        """Expose only documented, scalar Chroma metadata selectors.
+
+        Reject arbitrary operators, nested dictionaries and multiple fields:
+        Chroma expects a single predicate at the root of a where expression.
+        """
+        if value is None:
+            return None
+        if len(value) != 1:
+            raise ValueError("Exactly one metadata filter is allowed")
+        key, selected = next(iter(value.items()))
+        if key not in {"filename", "doc_id"}:
+            raise ValueError("Unsupported metadata filter")
+        if not isinstance(selected, str) or not selected.strip() or len(selected) > 255:
+            raise ValueError("Metadata filter values must be nonempty strings up to 255 characters")
+        return {key: selected.strip()}
+
 
 class Citation(BaseModel):
     doc_id: str
