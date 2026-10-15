@@ -277,3 +277,26 @@ def test_bm25_batch_matches_individual_updates_and_rebuilds_once(monkeypatch):
     assert batched.document_count() == len(corpus)
     assert batched.search('distinctterm', top_k=10)[0][0] == 'chunk-4'
     assert len(called) == 2
+
+
+@pytest.mark.parametrize("invalid_filters", [
+    {}, {"filename": "sop.txt", "doc_id": "other"},
+    {"$or": [{"filename": "sop.txt"}]},
+    {"filename": {"$ne": "sop.txt"}},
+    {"filename": ""}, {"filename": " "}, {"doc_id": 7},
+    {"filename": "x" * 256}, {"unsupported": "value"},
+])
+def test_query_rejects_unsupported_metadata_filters(client, invalid_filters):
+    result = client.post("/api/v1/query", headers=HEADERS,
+                         json={"query": "insiden", "filters": invalid_filters})
+    assert result.status_code == 422
+
+
+def test_query_accepts_document_id_metadata_filter():
+    from docmind.models.query import QueryRequest
+    parsed = QueryRequest.model_validate({
+        "query": "  bagaimana lapor insiden?  ",
+        "filters": {"doc_id": "  doc-42  "},
+    })
+    assert parsed.query == "bagaimana lapor insiden?"
+    assert parsed.filters == {"doc_id": "doc-42"}
