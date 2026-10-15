@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from zipfile import ZipFile, BadZipFile
 from pathlib import Path
 from typing import Optional, Set
 from urllib.parse import urlparse
@@ -105,6 +106,32 @@ MAGIC_BYTES = {
 }
 
 
+
+# ZIP Office uploads must be bounded by expanded size, not merely ZIP file size.
+MAX_ARCHIVE_MEMBERS = 2048
+MAX_ARCHIVE_EXPANDED_BYTES = min(256 * 1024 * 1024, max(64 * 1024 * 1024, MAX_UPLOAD_SIZE * 8))
+
+
+def validate_office_archive(path: Path) -> tuple[bool, str]:
+    try:
+        with ZipFile(path) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_ARCHIVE_MEMBERS:
+                return False, "Office archive has too many entries"
+            expanded = 0
+            for member in members:
+                name = member.filename.replace("\\", "/")
+                if (not name or name.startswith("/") or "\\x00" in name
+                        or ".." in name.split("/") or member.flag_bits & 1):
+                    return False, "Office archive contains unsafe entries"
+                expanded += member.file_size
+                if expanded > MAX_ARCHIVE_EXPANDED_BYTES:
+                    return False, "Office archive expands beyond size limit"
+    except (OSError, BadZipFile, ValueError):
+        return False, "Office archive structure is invalid"
+    return True, "OK"
+
+
 def validate_file_type(file_path: Path) -> tuple[bool, str]:
     """
     Validate file type by both extension and magic bytes.
@@ -120,6 +147,8 @@ def validate_file_type(file_path: Path) -> tuple[bool, str]:
                 header = f.read(8)
             for magic in MAGIC_BYTES[ext]:
                 if header.startswith(magic):
+                    if ext in {".docx", ".pptx"}:
+                        return validate_office_archive(file_path)
                     return True, "OK"
             return False, f"File header does not match {ext} signature"
         except Exception as e:
