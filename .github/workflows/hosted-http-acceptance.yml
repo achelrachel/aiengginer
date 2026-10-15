@@ -28,6 +28,16 @@ jobs:
               health = json.loads(body)
               assert health.get("status") == "ok"
               assert health.get("check") == "liveness"
+          readiness = urllib.request.Request(origin + "/ready",
+                                             headers={"User-Agent": "DocMind-Hosted-Readiness/1"})
+          with urllib.request.urlopen(readiness, timeout=15, context=context) as response:
+              payload = response.read(4097)
+              assert response.status == 200 and len(payload) <= 4096
+              detail = json.loads(payload)
+              assert detail.get("status") == "ready"
+              assert detail.get("database") == "ok"
+              assert detail.get("vector_store") == "ok"
+              assert detail.get("llm_provider") == "not_verified"
           request = urllib.request.Request(origin + "/api/v1/documents",
                                            headers={"User-Agent": "DocMind-Hosted-Readiness/1"})
           try:
