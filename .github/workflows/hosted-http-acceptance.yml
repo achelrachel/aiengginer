@@ -1,0 +1,42 @@
+name: DocMind Hosted HTTP Acceptance
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hosted:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check live health and anonymous document boundary
+        run: |
+          python - <<'PY'
+          import json
+          import ssl
+          import urllib.error
+          import urllib.request
+
+          origin = "https://aiengginer-production.up.railway.app"
+          context = ssl.create_default_context()
+          request = urllib.request.Request(origin + "/health",
+                                           headers={"User-Agent": "DocMind-Hosted-Readiness/1"})
+          with urllib.request.urlopen(request, timeout=15, context=context) as response:
+              body = response.read(4097)
+              assert response.status == 200 and len(body) <= 4096
+              health = json.loads(body)
+              assert health.get("status") == "ok"
+              assert health.get("check") == "liveness"
+          request = urllib.request.Request(origin + "/api/v1/documents",
+                                           headers={"User-Agent": "DocMind-Hosted-Readiness/1"})
+          try:
+              urllib.request.urlopen(request, timeout=15, context=context)
+          except urllib.error.HTTPError as error:
+              assert error.code == 401, f"Anonymous document access returned {error.code}"
+          else:
+              raise AssertionError("Anonymous document access unexpectedly succeeded")
+          print(json.dumps({"origin": origin, "health": "PASS",
+                            "anonymous_documents": "DENIED",
+                            "scope": "real HTTPS health and unauthenticated boundary only; no LLM, RAG or production acceptance"}))
+          PY
