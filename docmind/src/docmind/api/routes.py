@@ -53,7 +53,7 @@ async def upload_document(
     request_id = generate_request_id()
     bind_request_context(request_id, method="POST", path="/api/v1/documents/upload")
 
-    logger.info("upload_started", filename=file.filename, request_id=request_id)
+    logger.info("upload_started", filename_length=len(file.filename or ""), request_id=request_id)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -67,7 +67,7 @@ async def upload_document(
 
     try:
         document = await ingestion_service.ingest_file(file, file.filename)
-        logger.info("upload_success", doc_id=document.id, filename=file.filename)
+        logger.info("upload_success", doc_id=document.id, file_type=document.file_type)
         return DocumentUploadResponse(
             id=document.id,
             filename=document.original_filename,
