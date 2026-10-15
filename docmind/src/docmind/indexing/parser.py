@@ -95,12 +95,14 @@ def parse_file(path: Path) -> str:
     parser = PARSERS[ext]
     try:
         text = parser(path)
-    except Exception as e:
-        logger.error("parse_failed", path=str(path), error=str(e), exc_info=True)
-        raise RuntimeError(f"Failed to parse {path.name}: {e}")
+    except Exception as exc:
+        # The parser may include private document text or a server path in
+        # exception messages. Log only the failure category.
+        logger.error("parse_failed", file_type=ext, error_type=type(exc).__name__)
+        raise RuntimeError("Document parsing failed") from None
 
     if not text.strip():
-        logger.warning("empty_document", path=str(path))
-        raise ValueError(f"Document {path.name} is empty or contains no extractable text")
+        logger.warning("empty_document", file_type=ext)
+        raise ValueError("Document contains no extractable text")
 
     return text
