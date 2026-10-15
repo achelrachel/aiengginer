@@ -70,3 +70,16 @@ def test_authorization_requires_explicit_bearer_scheme(auth_header, expected):
     with TestClient(app) as client:
         response = client.get("/api/v1/documents", headers={"Authorization": auth_header})
         assert response.status_code == expected
+
+
+def test_rate_limited_http_response_uses_numeric_retry_after():
+    from types import SimpleNamespace
+    from docmind.rate_limit import rate_limit_exceeded_handler
+    from docmind.config import settings
+
+    response = rate_limit_exceeded_handler(None, SimpleNamespace(detail="10 per 1 minute"))
+    assert response.status_code == 429
+    assert response.headers["retry-after"].isdigit()
+    assert int(response.headers["retry-after"]) >= max(60, settings.rate_limit_window_seconds)
+    assert b'"retry_after_seconds"' in response.body
+    assert b'"retry_after":"10 per 1 minute"' in response.body
