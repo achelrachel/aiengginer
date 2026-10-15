@@ -51,9 +51,22 @@ class BM25Index:
         logger.debug("bm25_added", doc_id=doc_id, tokens=len(tokens))
 
     def add_documents(self, docs: List[Tuple[str, str]]) -> None:
-        """Batch add documents."""
+        """Batch add documents with one corpus-wide IDF recomputation.
+
+        Recomputing IDF per chunk on startup scales poorly for large
+        libraries. Preserve single-document upsert behavior for live updates.
+        """
+        changed = False
         for doc_id, text in docs:
-            self.add_document(doc_id, text)
+            changed = True
+            if doc_id not in self._documents:
+                self._doc_ids.append(doc_id)
+            self._documents[doc_id] = text
+            tokens = self._tokenize(text)
+            self._doc_lengths[doc_id] = len(tokens)
+            self._term_freqs[doc_id] = self._compute_term_freqs(tokens)
+        if changed:
+            self._recompute_idf()
 
     def remove_document(self, chunk_id: str) -> None:
         self._documents.pop(chunk_id, None)
