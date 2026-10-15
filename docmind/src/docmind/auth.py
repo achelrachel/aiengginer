@@ -26,9 +26,13 @@ async def get_api_key(
     """
     Validate API key from X-API-Key header or Authorization: Bearer <key>.
     """
-    key = x_api_key or (
-        authorization.removeprefix("Bearer ").strip() if authorization else None
-    )
+    # Authorization must use an explicit Bearer scheme. A raw
+    # Authorization value is not an API key; X-API-Key remains supported.
+    key = x_api_key
+    if not key and authorization:
+        scheme, separator, credential = authorization.strip().partition(" ")
+        if separator and scheme.casefold() == "bearer":
+            key = credential.strip()
 
     if not key:
         raise HTTPException(

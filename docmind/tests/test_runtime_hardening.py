@@ -56,3 +56,17 @@ def test_untrusted_origin_gets_no_cors_grant():
         response = client.get("/health", headers={"Origin": "https://untrusted.example"})
         assert response.status_code == 200
         assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.parametrize("auth_header, expected", [
+    ("Bearer test-only-key", 200),
+    ("bearer test-only-key", 200),
+    ("Basic test-only-key", 401),
+    ("test-only-key", 401),
+    ("ApiKey test-only-key", 401),
+    ("Bearer", 401),
+])
+def test_authorization_requires_explicit_bearer_scheme(auth_header, expected):
+    with TestClient(app) as client:
+        response = client.get("/api/v1/documents", headers={"Authorization": auth_header})
+        assert response.status_code == expected

@@ -3,6 +3,8 @@ Query service — orchestrates query processing, retrieval, and LLM response.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import time
@@ -176,7 +178,7 @@ class QueryService:
                 max_tokens=settings.llm_max_tokens,
             )
         except Exception as e:
-            logger.error("llm_failed", error=str(e))
+            logger.error("llm_failed", error_type=type(e).__name__)
             # Return graceful error response
             return {
                 "answer": "Maaf, terjadi kesalahan saat memproses pertanyaan. Silakan coba lagi.",
@@ -199,7 +201,7 @@ class QueryService:
         try:
             parsed = QueryAnswer.model_validate_json(response.content)
         except Exception as e:
-            logger.error("parse_failed", error=str(e), raw=response.content[:500])
+            logger.error("parse_failed", error_type=type(e).__name__, response_length=len(response.content))
             # Fallback: try to extract JSON from response
             try:
                 json_str = response.content
@@ -290,9 +292,14 @@ class QueryService:
         """Save query audit record."""
         async with get_session() as session:
             audit = QueryAudit(
-                query_text=query[:2048],
+                # The audit table uses legacy column names; never persist raw
+                # user questions or generated answers in these fields.
+                query_text="hmac-sha256:" + hmac.new(
+                    settings.api_key.encode("utf-8"), query.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest(),
                 query_language="id",
-                response_text=response_data.get("answer", "")[:8192],
+                response_text="[redacted]",
                 answer_status=response_data.get("answer_status", "refused"),
                 retrieval_count=retrieval_count,
                 retrieval_latency_ms=retrieval_latency_ms,

@@ -182,3 +182,33 @@ def test_vector_failure_marks_document_failed(client, monkeypatch):
     failed = [d for d in docs if d['filename'] == 'failure.txt']
     assert len(failed) == 1 and failed[0]['status'] == 'failed'
     assert not get_bm25_storage().get_index().search('Failed')
+
+
+@pytest.mark.asyncio
+async def test_query_audit_never_persists_raw_question_or_answer():
+    from docmind.db.models import QueryAudit, init_db
+    from docmind.services.query import QueryService
+
+    await init_db()
+    private_question = "Confidential incident number 12345 belongs to this document"
+    private_answer = "Private incident details must not leak through an audit trail"
+    await QueryService()._audit_log(
+        query=private_question,
+        response_data={"answer": private_answer, "answer_status": "answered",
+                       "total_latency_ms": 10.0, "input_tokens": 2, "output_tokens": 4},
+        retrieval_count=1, retrieval_latency_ms=4.0, llm_latency_ms=6.0,
+    )
+    async with get_session() as session:
+        audits = (await session.execute(select(QueryAudit))).scalars().all()
+    matching = [row for row in audits
+                if row.query_text.startswith("hmac-sha256:")
+                and row.answer_status == "answered"]
+    assert matching
+    stored = matching[-1]
+    assert len(stored.query_text) == len("hmac-sha256:") + 64
+    assert stored.query_text != private_question
+    assert private_question not in stored.query_text
+    assert private_answer not in stored.response_text
+    assert stored.response_text == "[redacted]"
+    assert stored.input_tokens == 2
+    assert stored.output_tokens == 4
