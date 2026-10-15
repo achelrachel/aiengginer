@@ -23,13 +23,19 @@ limiter = Limiter(
 
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    # HTTP Retry-After must be delay-seconds or a valid HTTP date (RFC 9110).
+    # SlowAPI's exc.detail is a human-readable limit description, not a delay.
+    # Use a conservative bound because both the global limit and endpoint
+    # overrides must have had time to reset before a client retries.
+    retry_after_seconds = max(60, settings.rate_limit_window_seconds)
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content={
             "detail": "Rate limit exceeded. Please try again later.",
             "retry_after": exc.detail,
+            "retry_after_seconds": retry_after_seconds,
         },
-        headers={"Retry-After": str(exc.detail)},
+        headers={"Retry-After": str(retry_after_seconds)},
     )
 
 
