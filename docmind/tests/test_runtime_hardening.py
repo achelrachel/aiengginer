@@ -101,3 +101,54 @@ def test_ingestion_logs_do_not_interpolate_user_document_names_or_temporary_path
             if not isinstance(node.func.value, ast.Name) or node.func.value.id != "logger":
                 continue
             assert all(k.arg not in {"filename", "path"} for k in node.keywords), (path, node.lineno)
+
+
+def test_office_upload_rejects_non_zip_even_with_matching_magic(tmp_path):
+    from docmind.security.validation import validate_file_type
+    fake = tmp_path / "fake.docx"
+    fake.write_bytes(b"PK\\x03\\x04" + b"not-a-central-directory")
+    is_valid, _ = validate_file_type(fake)
+    assert is_valid is False
+
+
+def test_office_upload_rejects_path_traversal_in_archive(tmp_path):
+    from zipfile import ZipFile
+    from docmind.security.validation import validate_file_type
+    malicious = tmp_path / "traversal.docx"
+    with ZipFile(malicious, "w") as archive:
+        archive.writestr("../payload.xml", "<p/>")
+    assert validate_file_type(malicious)[0] is False
+
+
+def test_office_upload_rejects_decompression_bomb_before_parsing(tmp_path, monkeypatch):
+    from docmind.security import validation
+    archive_path = tmp_path / "large.docx"
+    archive_path.write_bytes(b"PK\\x03\\x04")
+    class Entry:
+        filename = "word/document.xml"
+        file_size = validation.MAX_ARCHIVE_EXPANDED_BYTES + 1
+        flag_bits = 0
+    class FakeZip:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def infolist(self):
+            return [Entry()]
+    monkeypatch.setattr(validation, "ZipFile", lambda _path: FakeZip())
+    valid, reason = validation.validate_file_type(archive_path)
+    assert not valid
+    assert "size limit" in reason
+
+
+def test_parser_rejection_excludes_user_paths_from_errors_and_logs(tmp_path, monkeypatch):
+    from docmind.indexing import parser
+    path = tmp_path / "sensitive-client-name.txt"
+    path.write_text(" ")
+    logs = []
+    monkeypatch.setattr(parser.logger, "warning", lambda *args, **kwargs: logs.append((args, kwargs)))
+    with pytest.raises(ValueError) as err:
+        parser.parse_file(path)
+    assert path.name not in str(err.value)
+    assert all("path" not in kwargs for _args, kwargs in logs)
+    assert all(path.name not in str(item) for item in logs)
