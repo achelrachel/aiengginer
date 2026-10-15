@@ -99,13 +99,9 @@ async def list_documents(
     request_id = generate_request_id()
     bind_request_context(request_id, method="GET", path="/api/v1/documents")
 
-    documents = await ingestion_service.list_documents()
-    total = len(documents)
-    start = (page - 1) * page_size
-    end = start + page_size
-
+    documents, total = await ingestion_service.list_documents(page, page_size)
     return DocumentListResponse(
-        documents=documents[start:end],
+        documents=documents,
         total=total,
     )
 

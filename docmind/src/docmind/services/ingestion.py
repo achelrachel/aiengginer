@@ -197,15 +197,21 @@ class IngestionService:
             if safe_path.exists():
                 safe_path.unlink(missing_ok=True)
 
-    async def list_documents(self):
-        """List all documents from metadata database."""
+    async def list_documents(self, page: int, page_size: int):
+        """Paginate in SQL instead of loading every document into API memory."""
+        from sqlalchemy import func
+
         async with get_session() as session:
-            from docmind.db.models import Document
+            total = (await session.execute(
+                select(func.count()).select_from(Document)
+            )).scalar_one()
             result = await session.execute(
-                __import__("sqlalchemy").select(Document).order_by(Document.created_at.desc())
+                select(Document)
+                .order_by(Document.created_at.desc(), Document.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
-            documents = result.scalars().all()
-            return [doc.to_public_dict() for doc in documents]
+            return [doc.to_public_dict() for doc in result.scalars().all()], total
 
     async def get_document(self, doc_id: str) -> Optional[dict]:
         """Get a single document by ID."""
