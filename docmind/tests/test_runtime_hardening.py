@@ -176,3 +176,29 @@ def test_partial_upload_failures_do_not_log_original_exception_text():
     source = inspect.getsource(IngestionService.ingest_file)
     assert 'safe_path.unlink(missing_ok=True)' in source
     assert 'logger.error("file_save_failed", error_type=type(exc).__name__)' in source
+
+
+def test_parser_exception_is_redacted_instead_of_masked_by_logging(tmp_path, monkeypatch):
+    """Regression: stdlib Logger.error cannot accept structured keyword fields."""
+    from docmind.indexing import parser
+
+    path = tmp_path / "private-client.txt"
+    path.write_text("customer-only content", encoding="utf-8")
+
+    def failing_parser(_path):
+        raise RuntimeError("private upstream parser error")
+
+    monkeypatch.setitem(parser.PARSERS, ".txt", failing_parser)
+    with pytest.raises(RuntimeError, match="^Document parsing failed$") as error:
+        parser.parse_file(path)
+    assert "private upstream" not in str(error.value)
+
+
+def test_parser_empty_document_reports_validation_error(tmp_path):
+    """The warning logger must also support structured fields."""
+    from docmind.indexing import parser
+
+    path = tmp_path / "empty.txt"
+    path.write_text("   ", encoding="utf-8")
+    with pytest.raises(ValueError, match="Document contains no extractable text"):
+        parser.parse_file(path)
