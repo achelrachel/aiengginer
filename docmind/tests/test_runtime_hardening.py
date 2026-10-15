@@ -106,7 +106,7 @@ def test_ingestion_logs_do_not_interpolate_user_document_names_or_temporary_path
 def test_office_upload_rejects_non_zip_even_with_matching_magic(tmp_path):
     from docmind.security.validation import validate_file_type
     fake = tmp_path / "fake.docx"
-    fake.write_bytes(b"PK\\x03\\x04" + b"not-a-central-directory")
+    fake.write_bytes(bytes((80, 75, 3, 4)) + b"not-a-central-directory")
     is_valid, _ = validate_file_type(fake)
     assert is_valid is False
 
@@ -123,7 +123,7 @@ def test_office_upload_rejects_path_traversal_in_archive(tmp_path):
 def test_office_upload_rejects_decompression_bomb_before_parsing(tmp_path, monkeypatch):
     from docmind.security import validation
     archive_path = tmp_path / "large.docx"
-    archive_path.write_bytes(b"PK\\x03\\x04")
+    archive_path.write_bytes(bytes((80, 75, 3, 4)))
     class Entry:
         filename = "word/document.xml"
         file_size = validation.MAX_ARCHIVE_EXPANDED_BYTES + 1
