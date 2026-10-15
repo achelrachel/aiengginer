@@ -94,6 +94,29 @@ async def health_check():
     }
 
 
+@app.get("/ready")
+async def readiness_check():
+    """Require working durable metadata and vector stores before serving traffic.
+
+    Model/provider availability is assessed separately; do not claim RAG ready
+    solely because the database and service are reachable.
+    """
+    from sqlalchemy import text
+    from docmind.db.models import get_session
+    from docmind.vectorstore.client import get_vector_store
+
+    try:
+        async with get_session() as session:
+            await session.execute(text("SELECT 1"))
+        await get_vector_store().count()
+    except Exception as exc:
+        logger.warning("readiness_dependency_failed", error_type=type(exc).__name__)
+        return JSONResponse({"status": "not_ready", "code": "DEPENDENCY_UNAVAILABLE"},
+                            status_code=503)
+    return {"status": "ready", "database": "ok", "vector_store": "ok",
+            "llm_provider": "not_verified"}
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
