@@ -233,7 +233,13 @@ async def test_partial_chroma_write_is_compensated_when_ingest_fails(client, mon
             Document.original_filename == 'partial.txt'))).scalars().first()
     assert row is not None
     assert row.status == 'failed'
+    assert row.chunk_count == 0
     assert row.error_message == 'INGESTION_FAILED_RuntimeError'
+    async with get_session() as session:
+        committed_chunks = (await session.execute(
+            select(Chunk).where(Chunk.document_id == row.id)
+        )).scalars().all()
+    assert committed_chunks == []
     assert 'private input' not in row.error_message
     remaining = await store.get_chunks(where={'doc_id': row.id})
     assert remaining['ids'] == []
