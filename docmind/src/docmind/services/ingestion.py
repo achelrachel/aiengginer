@@ -44,7 +44,7 @@ class IngestionService:
 
         Returns the created Document record.
         """
-        logger.info("ingest_start", filename=original_filename, content_type=file.content_type)
+        logger.info("ingest_start", file_extension=Path(original_filename).suffix.lower(), filename_length=len(original_filename), content_type=file.content_type)
 
         # Step 1: Validate file
         if file.size and file.size > MAX_UPLOAD_SIZE:
@@ -65,7 +65,7 @@ class IngestionService:
         is_valid, reason = validate_file_type(safe_path)
         if not is_valid:
             safe_path.unlink(missing_ok=True)
-            logger.warning("invalid_file_type", filename=original_filename, reason=reason)
+            logger.warning("invalid_file_type", file_extension=Path(original_filename).suffix.lower(), reason=reason)
             raise ValueError(f"Invalid file type: {reason}")
 
         # Determine file type
@@ -75,13 +75,13 @@ class IngestionService:
         document_id = str(uuid.uuid4())
         try:
             # Step 2: Parse document
-            logger.info("parsing", filename=original_filename, path=str(safe_path))
+            logger.info("parsing", doc_id=document_id, file_type=file_type)
             text = parse_file(safe_path)
 
             if not text.strip():
                 raise ValueError("Document is empty after parsing")
 
-            logger.info("parsed_success", chars=len(text), filename=original_filename)
+            logger.info("parsed_success", chars=len(text), doc_id=document_id)
 
             # Step 3: Chunk text
 
