@@ -165,7 +165,20 @@ class IngestionService:
             return doc
 
         except Exception as e:
-            logger.error("ingest_failed", filename=original_filename, error=str(e), exc_info=True)
+            # Chroma can partially commit before an upsert or a later SQLite
+            # operation fails. Compensate so failed documents cannot surface
+            # through vector retrieval or the in-memory keyword index.
+            try:
+                await get_vector_store().delete_document(document_id)
+            except Exception as cleanup_error:
+                logger.error("ingest_vector_cleanup_failed",
+                             error_type=type(cleanup_error).__name__, doc_id=document_id)
+            if "chunks" in locals():
+                index = get_bm25_storage().get_index()
+                for chunk in chunks:
+                    index.remove_document(chunk.id)
+            logger.error("ingest_failed", doc_id=document_id,
+                         error_type=type(e).__name__)
             async with get_session() as session:
                 doc = await session.get(Document, document_id)
                 if doc is None:
@@ -176,7 +189,7 @@ class IngestionService:
                     )
                     session.add(doc)
                 doc.status = "failed"
-                doc.error_message = str(e)[:2048]
+                doc.error_message = "INGESTION_FAILED_" + type(e).__name__[:64]
                 await session.commit()
             raise
         finally:

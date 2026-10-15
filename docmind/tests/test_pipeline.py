@@ -212,3 +212,40 @@ async def test_query_audit_never_persists_raw_question_or_answer():
     assert stored.response_text == "[redacted]"
     assert stored.input_tokens == 2
     assert stored.output_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_partial_chroma_write_is_compensated_when_ingest_fails(client, monkeypatch):
+    from docmind.vectorstore.client import get_vector_store
+    store = get_vector_store()
+    original_upsert = store.upsert_chunks
+
+    async def partially_commit_then_fail(chunks, embeddings):
+        await original_upsert(chunks, embeddings)
+        raise RuntimeError('synthetic post-write failure with private input')
+
+    monkeypatch.setattr(store, 'upsert_chunks', partially_commit_then_fail)
+    result = client.post('/api/v1/documents/upload', headers=HEADERS,
+                         files={'file': ('partial.txt', 'Private uniquerollback phrase.', 'text/plain')})
+    assert result.status_code == 500
+    async with get_session() as session:
+        row = (await session.execute(select(Document).where(
+            Document.original_filename == 'partial.txt'))).scalars().first()
+    assert row is not None
+    assert row.status == 'failed'
+    assert row.error_message == 'INGESTION_FAILED_RuntimeError'
+    assert 'private input' not in row.error_message
+    remaining = await store.get_chunks(where={'doc_id': row.id})
+    assert remaining['ids'] == []
+    assert not get_bm25_storage().get_index().search('uniquerollback')
+
+
+def test_new_lifespan_discards_stale_keyword_index_entries(monkeypatch):
+    from docmind.retrieval.bm25 import get_bm25_storage
+    from docmind.embedding import model
+    index = get_bm25_storage().get_index()
+    index.add_document('orphan-not-in-db', 'orphankeywordnameddoc')
+    assert index.search('orphankeywordnameddoc')
+    monkeypatch.setattr(model, '_default_embedder', DeterministicEmbedder())
+    with TestClient(app):
+        assert not get_bm25_storage().get_index().search('orphankeywordnameddoc')

@@ -30,11 +30,14 @@ async def lifespan(app: FastAPI):
     await init_db()
     from sqlalchemy import select
     from docmind.db.models import Chunk, Document, get_session
-    from docmind.retrieval.bm25 import get_bm25_storage
+    from docmind.retrieval.bm25 import get_bm25_storage, reset_bm25
     async with get_session() as session:
         rows = (await session.execute(
             select(Chunk.id, Chunk.text).join(Document).where(Document.status == "indexed")
         )).all()
+    # SQLite is authoritative across restarts; discard any stale in-process
+    # BM25 document IDs from a previous app lifespan.
+    reset_bm25()
     get_bm25_storage().get_index().add_documents(list(rows))
     setup_rate_limit(app)
     logger.info("startup_complete")
