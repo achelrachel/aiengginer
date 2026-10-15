@@ -152,3 +152,27 @@ def test_parser_rejection_excludes_user_paths_from_errors_and_logs(tmp_path, mon
     assert path.name not in str(err.value)
     assert all("path" not in kwargs for _args, kwargs in logs)
     assert all(path.name not in str(item) for item in logs)
+
+
+def test_unhandled_errors_do_not_log_exception_text_or_traceback():
+    import ast
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / 'src' / 'docmind' / 'main.py'
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    candidates = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == 'error' and n.args
+        and isinstance(n.args[0], ast.Constant)
+        and n.args[0].value == 'unhandled_exception'
+    ]
+    assert len(candidates) == 1
+    assert {kw.arg for kw in candidates[0].keywords} == {'error_type'}
+
+
+def test_partial_upload_failures_do_not_log_original_exception_text():
+    import inspect
+    from docmind.services.ingestion import IngestionService
+    source = inspect.getsource(IngestionService.ingest_file)
+    assert 'safe_path.unlink(missing_ok=True)' in source
+    assert 'logger.error("file_save_failed", error_type=type(exc).__name__)' in source

@@ -57,8 +57,11 @@ class IngestionService:
             if len(content) > MAX_UPLOAD_SIZE:
                 raise ValueError(f"File content size exceeds maximum")
             safe_path.write_bytes(content)
-        except Exception as e:
-            logger.error("file_save_failed", error=str(e))
+        except Exception as exc:
+            # write_bytes can fail after partially writing a private upload.
+            # Remove it and avoid logging OS paths or untrusted exception text.
+            safe_path.unlink(missing_ok=True)
+            logger.error("file_save_failed", error_type=type(exc).__name__)
             raise
 
         # Validate file type by magic bytes

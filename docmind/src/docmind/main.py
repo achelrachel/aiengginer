@@ -77,7 +77,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc: Exception):
-    logger.error("unhandled_exception", error=str(exc), exc_info=True)
+    logger.error("unhandled_exception", error_type=type(exc).__name__)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
