@@ -121,7 +121,7 @@ def validate_office_archive(path: Path) -> tuple[bool, str]:
             expanded = 0
             for member in members:
                 name = member.filename.replace("\\", "/")
-                if (not name or name.startswith("/") or "\\x00" in name
+                if (not name or name.startswith("/") or any(ord(char) < 32 for char in name)
                         or ".." in name.split("/") or member.flag_bits & 1):
                     return False, "Office archive contains unsafe entries"
                 expanded += member.file_size
