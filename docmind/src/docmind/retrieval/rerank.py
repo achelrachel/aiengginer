@@ -110,7 +110,11 @@ async def retrieve_and_rerank(
     index = bm25_storage.get_index()
     bm25_results = index.search(query, top_k=len(index))
     if allowed_ids is not None:
+        # Apply access restrictions to BOTH retrieval sources before fusion or
+        # fetching chunk text; otherwise unauthorized vector hits can leak into
+        # citations even when BM25 itself was restricted.
         bm25_results = [x for x in bm25_results if x[0] in allowed_ids]
+        vector_results = [x for x in vector_results if x[0] in allowed_ids]
     fused = reciprocal_rank_fusion(bm25_results[:max(50, top_k * 5)], vector_results)
     fused = fused[:max(20, top_k * 3)]
     if fused:
