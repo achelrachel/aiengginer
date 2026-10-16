@@ -202,3 +202,67 @@ def test_parser_empty_document_reports_validation_error(tmp_path):
     path.write_text("   ", encoding="utf-8")
     with pytest.raises(ValueError, match="Document contains no extractable text"):
         parser.parse_file(path)
+
+
+@pytest.mark.parametrize("exception_type", [ValueError, RuntimeError])
+def test_query_api_never_exposes_or_logs_private_provider_errors(monkeypatch, exception_type):
+    from docmind.api import routes
+
+    secret = "customer-private-query-provider-payload"
+    observed = []
+
+    async def unavailable(**_kwargs):
+        raise exception_type(secret)
+
+    monkeypatch.setattr(routes.query_service, "query", unavailable)
+    monkeypatch.setattr(routes.logger, "warning", lambda *a, **k: observed.append((a, k)))
+    monkeypatch.setattr(routes.logger, "error", lambda *a, **k: observed.append((a, k)))
+    with TestClient(app) as client:
+        result = client.post("/api/v1/query",
+                             headers={"Authorization": "Bearer test-only-key"},
+                             json={"query": "Periksa laporan insiden"})
+    assert result.status_code == (400 if exception_type is ValueError else 500)
+    assert secret not in result.text
+    assert secret not in repr(observed)
+    assert observed
+    assert all("exc_info" not in kwargs for _, kwargs in observed)
+
+
+@pytest.mark.parametrize("exception_type", [ValueError, RuntimeError])
+def test_upload_api_never_exposes_or_logs_private_parser_errors(monkeypatch, exception_type):
+    from docmind.api import routes
+
+    secret = "customer-private-upload-path-or-document-content"
+    observed = []
+
+    async def broken(_file, _filename):
+        raise exception_type(secret)
+
+    monkeypatch.setattr(routes.ingestion_service, "ingest_file", broken)
+    monkeypatch.setattr(routes.logger, "warning", lambda *a, **k: observed.append((a, k)))
+    monkeypatch.setattr(routes.logger, "error", lambda *a, **k: observed.append((a, k)))
+    with TestClient(app) as client:
+        result = client.post("/api/v1/documents/upload",
+                             headers={"Authorization": "Bearer test-only-key"},
+                             files={"file": ("customer.txt", b"private-content", "text/plain")})
+    assert result.status_code == (400 if exception_type is ValueError else 500)
+    assert secret not in result.text
+    assert secret not in repr(observed)
+    assert observed
+    assert all("exc_info" not in kwargs for _, kwargs in observed)
+
+
+def test_unreadable_upload_magic_does_not_expose_storage_path(tmp_path, monkeypatch):
+    from docmind.security import validation
+
+    path = tmp_path / "private-client-name.pdf"
+    path.write_bytes(b"%PDF" + b"placeholder")
+
+    def denied(*_args, **_kwargs):
+        raise OSError("private-client-name.pdf is unreadable")
+
+    monkeypatch.setattr("builtins.open", denied)
+    valid, reason = validation.validate_file_type(path)
+    assert not valid
+    assert "private-client-name" not in reason
+    assert "could not be read" in reason
