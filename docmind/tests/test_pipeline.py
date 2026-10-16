@@ -353,3 +353,32 @@ def test_document_list_uses_stable_paginated_results(client):
     finally:
         for doc_id in uploaded:
             assert client.delete(f'/api/v1/documents/{doc_id}', headers=HEADERS).status_code == 200
+
+def test_authenticated_health_counts_persisted_documents_instead_of_fake_zero(client):
+    assert client.get("/api/v1/health").status_code == 401
+    before = client.get("/api/v1/health", headers=HEADERS)
+    assert before.status_code == 200, before.text
+    assert before.json()["database"] == "connected"
+    assert before.json()["vector_store"] == "connected"
+    assert before.json()["llm_provider"] == "not_verified"
+    count = before.json()["document_count"]
+    added = client.post("/api/v1/documents/upload", headers=HEADERS,
+                        files={"file": ("health-check.txt", "Counted source text for storage health.", "text/plain")})
+    assert added.status_code == 200, added.text
+    after = client.get("/api/v1/health", headers=HEADERS)
+    assert after.status_code == 200, after.text
+    assert after.json()["document_count"] == count + 1
+    assert client.delete(f"/api/v1/documents/{added.json()['id']}", headers=HEADERS).status_code == 200
+
+
+def test_diagnostic_health_fails_closed_on_vector_store_outage(client, monkeypatch):
+    import docmind.vectorstore.client as vector_module
+
+    class UnavailableStore:
+        async def count(self):
+            raise RuntimeError("simulated unavailable vector database")
+
+    monkeypatch.setattr(vector_module, "get_vector_store", lambda: UnavailableStore())
+    response = client.get("/api/v1/health", headers=HEADERS)
+    assert response.status_code == 503
+    assert "simulated unavailable" not in response.text
