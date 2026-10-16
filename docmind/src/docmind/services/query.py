@@ -232,12 +232,19 @@ class QueryService:
                     or not cit.excerpt.strip() or cit.excerpt not in source["text"]):
                 invalid_citation = True
                 break
+            # Similarity is a retriever measurement, not an LLM assertion.
+            # Never let the language model invent its own evidence score.
+            measured_score = source["metadata"]["similarity_score"]
+            if (type(measured_score) not in (int, float)
+                    or not 0.0 <= measured_score <= 1.0):
+                invalid_citation = True
+                break
             citations.append({
                 "doc_id": cit.doc_id,
                 "filename": cit.filename,
                 "chunk_index": cit.chunk_index,
                 "excerpt": cit.excerpt[:1500],
-                "similarity_score": cit.similarity_score,
+                "similarity_score": measured_score,
             })
 
         if invalid_citation or (parsed.answer_status.value != "refused" and not citations):
