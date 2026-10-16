@@ -382,3 +382,20 @@ def test_diagnostic_health_fails_closed_on_vector_store_outage(client, monkeypat
     response = client.get("/api/v1/health", headers=HEADERS)
     assert response.status_code == 503
     assert "simulated unavailable" not in response.text
+
+
+def test_citation_similarity_is_measured_not_llm_invented(client):
+    upload = client.post("/api/v1/documents/upload", headers=HEADERS,
+                         files={"file": ("citation-score.txt", "Periksa insiden melalui tim keamanan.", "text/plain")})
+    assert upload.status_code == 200, upload.text
+    try:
+        response = client.post("/api/v1/query", headers=HEADERS,
+                               json={"query": "Periksa insiden"})
+        assert response.status_code == 200, response.text
+        assert response.json()["answer_status"] == "answered"
+        citation = response.json()["citations"][0]
+        # The deterministic test LLM always claims 1.0; actual RRF/cosine
+        # fusion provides a different, measured and bounded confidence.
+        assert 0.0 < citation["similarity_score"] < 1.0
+    finally:
+        client.delete(f"/api/v1/documents/{upload.json()['id']}", headers=HEADERS)
