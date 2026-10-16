@@ -193,14 +193,29 @@ async def query_knowledge_base(
         raise HTTPException(status_code=500, detail="Query failed")
 
 
-@router.get("/health")
-async def health_check():
-    """Health check endpoint (no auth required)."""
+@router.get("/health", response_model=HealthResponse)
+async def health_check(api_key: str = Depends(get_api_key)):
+    """Authenticated, measured storage status; provider is not probed here.
+
+    Unauthenticated liveness is available at /health. This diagnostic never
+    returns a made-up document count or calls an external LLM provider.
+    """
+    from sqlalchemy import func, select
+    from docmind.db.models import Document, get_session
+    from docmind.vectorstore.client import get_vector_store
+
+    try:
+        async with get_session() as session:
+            count = (await session.execute(select(func.count()).select_from(Document))).scalar_one()
+        await get_vector_store().count()
+    except Exception as exc:
+        logger.warning("health_storage_unavailable", error_type=type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Storage unavailable") from exc
     return HealthResponse(
         status="ok",
         version="1.0.0",
-        database="not_checked",
-        vector_store="not_checked",
-        llm_provider="not_checked",
-        document_count=0,
+        database="connected",
+        vector_store="connected",
+        llm_provider="not_verified",
+        document_count=count,
     )
