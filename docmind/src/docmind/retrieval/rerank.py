@@ -4,6 +4,7 @@ Reranking and result processing for retrieval.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from docmind.config import settings
@@ -23,10 +24,9 @@ async def rerank_results(
     Rerank retrieval candidates using cosine similarity between
     query embedding and chunk text embedding.
 
-    For demo, we use the embedder to compute query embedding and
-    re-rank by combined RRF + similarity score.
-
-    In production, this would use a cross-encoder model.
+    The implementation uses the configured embedder for query and chunk
+    embeddings and combines cosine similarity with reciprocal-rank fusion.
+    This is not a cross-encoder and makes no cross-encoder quality claim.
     """
     if not candidates:
         return []
@@ -53,6 +53,17 @@ async def rerank_results(
             chunk_embedding = embedder.embed_text(chunk_text)
             chunk_norm = sum(x * x for x in chunk_embedding) ** 0.5
 
+            # zip() silently truncates incompatible dimensions, producing a
+            # plausible but meaningless score. Ignore such candidates rather
+            # than ranking them as if both vectors used the same model.
+            if (
+                not query_embedding
+                or len(query_embedding) != len(chunk_embedding)
+                or not all(isinstance(v, (int, float)) and math.isfinite(v)
+                           for v in [*query_embedding, *chunk_embedding])
+            ):
+                logger.warning("rerank_embedding_invalid", doc_id_length=len(str(doc_id)))
+                continue
             if query_norm > 0 and chunk_norm > 0:
                 dot = sum(a * b for a, b in zip(query_embedding, chunk_embedding))
                 similarity = dot / (query_norm * chunk_norm)
@@ -61,8 +72,12 @@ async def rerank_results(
         else:
             similarity = rrf_score
 
+        if not isinstance(rrf_score, (int, float)) or not math.isfinite(rrf_score):
+            continue
         # Combined score: weighted RRF + similarity
         combined = 0.4 * rrf_score + 0.6 * similarity
+        if not math.isfinite(combined):
+            continue
 
         reranked.append({
             "doc_id": doc_id,
