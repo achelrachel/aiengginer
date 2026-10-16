@@ -4,6 +4,7 @@ Hybrid retrieval — RRF fusion of BM25 and vector results.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from docmind.logging_config import get_logger
@@ -30,21 +31,38 @@ def reciprocal_rank_fusion(
     Returns:
         List of fused results with doc_id, combined score, and metadata.
     """
-    # Convert to rank-based scores
+    if type(k) not in (int, float) or not math.isfinite(k) or k <= 0:
+        raise ValueError("RRF k must be a finite positive number")
     rrf_scores: Dict[str, float] = {}
 
-    # BM25: rank by score descending
-    for rank, (doc_id, _) in enumerate(bm25_results, 1):
+    # Only one vote per chunk per retriever. Duplicate results must not
+    # artificially boost a chunk's relevance across independent searches.
+    seen_bm25 = set()
+    for rank, (doc_id, score) in enumerate(bm25_results, 1):
+        if (not isinstance(doc_id, str) or not doc_id or doc_id in seen_bm25
+                or type(score) not in (int, float) or not math.isfinite(score)):
+            continue
+        seen_bm25.add(doc_id)
         rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (k + rank)
 
-    # Vector: rank by distance ascending (lower = more similar = higher rank)
-    # Convert distance to similarity: sim = 1 - distance
-    vector_ranked = sorted(vector_results, key=lambda x: x[1])
+    # Chroma distance must be finite. NaN/Inf may otherwise sort
+    # unpredictably and appear in the evidence presented to an LLM.
+    valid_vectors = [
+        (doc_id, distance, metadata)
+        for doc_id, distance, metadata in vector_results
+        if isinstance(doc_id, str) and doc_id
+        and type(distance) in (int, float) and math.isfinite(distance)
+        and isinstance(metadata, dict)
+    ]
+    vector_ranked = sorted(valid_vectors, key=lambda row: row[1])
+    metadata_by_id = {}
+    seen_vector = set()
     for rank, (doc_id, distance, metadata) in enumerate(vector_ranked, 1):
+        if doc_id in seen_vector:
+            continue
+        seen_vector.add(doc_id)
+        metadata_by_id[doc_id] = metadata
         rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (k + rank)
-
-    # Build result list
-    metadata_by_id = {doc_id: metadata for doc_id, _, metadata in vector_results}
     results = []
     for doc_id, rrf_score in rrf_scores.items():
         results.append({
