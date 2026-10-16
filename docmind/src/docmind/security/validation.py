@@ -151,8 +151,9 @@ def validate_file_type(file_path: Path) -> tuple[bool, str]:
                         return validate_office_archive(file_path)
                     return True, "OK"
             return False, f"File header does not match {ext} signature"
-        except Exception as e:
-            return False, f"Error reading file: {e}"
+        except Exception:
+            # File-system exceptions can contain private upload paths.
+            return False, "File signature could not be read"
 
     return True, "OK"
 
