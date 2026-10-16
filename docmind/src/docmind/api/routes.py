@@ -79,10 +79,10 @@ async def upload_document(
             created_at=document.created_at,
         )
     except ValueError as e:
-        logger.warning("upload_validation_failed", error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("upload_validation_failed", error_type=type(e).__name__)
+        raise HTTPException(status_code=400, detail="Invalid document content")
     except Exception as e:
-        logger.error("upload_failed", error=str(e), exc_info=True)
+        logger.error("upload_failed", error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail="Ingestion failed")
 
 
@@ -186,10 +186,10 @@ async def query_knowledge_base(
         )
         return result
     except ValueError as e:
-        logger.warning("query_validation_failed", error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("query_validation_failed", error_type=type(e).__name__)
+        raise HTTPException(status_code=400, detail="Invalid query parameters")
     except Exception as e:
-        logger.error("query_failed", error=str(e), exc_info=True)
+        logger.error("query_failed", error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail="Query failed")
 
 
