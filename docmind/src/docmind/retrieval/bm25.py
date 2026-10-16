@@ -38,14 +38,14 @@ class BM25Index:
 
     def add_document(self, doc_id: str, text: str) -> None:
         """Add a document to the index."""
-        self._documents[doc_id] = text
-        if doc_id not in self._documents or doc_id not in self._doc_ids:
+        if doc_id not in self._documents:
             self._doc_ids.append(doc_id)
+        self._documents[doc_id] = text
         tokens = self._tokenize(text)
         self._doc_lengths[doc_id] = len(tokens)
         self._term_freqs[doc_id] = self._compute_term_freqs(tokens)
 
-        # Rebuild IDF after each addition (simple approach)
+        # Keep corpus IDF consistent after an insertion or update.
         self._recompute_idf()
 
         logger.debug("bm25_added", doc_id=doc_id, tokens=len(tokens))
@@ -111,7 +111,7 @@ class BM25Index:
     def expand_query(self, query: str) -> List[str]:
         """
         Simple query expansion: include original tokens.
-        In production, could use synonym expansion or translation.
+        Only exact token expansion is supported in this retrieval layer.
         """
         if query in self._expanded:
             return self._expanded[query]
@@ -177,9 +177,10 @@ class BM25Index:
 
 
 class BM25Storage:
-    """
-    Persistent BM25 index storage.
-    Uses simple JSON files for demo; production would use a proper search index.
+    """In-memory BM25 index whose source of truth is SQLite.
+
+    At API startup the index is rebuilt from committed document chunks.
+    This class does not provide independent on-disk BM25 persistence.
     """
 
     def __init__(self, storage_dir: Path = Path("./data/bm25")):
@@ -194,14 +195,12 @@ class BM25Storage:
         return self._index
 
     def _load(self) -> None:
-        """Load index from disk (simple implementation)."""
-        # The authoritative index is rebuilt from SQLite at application startup.
-        pass
+        """Compatibility hook; startup rebuilds the index from SQLite."""
+        return None
 
     def save(self) -> None:
-        """Save index to disk."""
-        # For demo, no persistence needed
-        pass
+        """Compatibility hook; SQLite is responsible for persistence."""
+        return None
 
 
 _default_bm25: Optional[BM25Storage] = None
