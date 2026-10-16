@@ -386,7 +386,7 @@ def test_diagnostic_health_fails_closed_on_vector_store_outage(client, monkeypat
 
 def test_citation_similarity_is_measured_not_llm_invented(client):
     upload = client.post("/api/v1/documents/upload", headers=HEADERS,
-                         files={"file": ("citation-score.txt", "Periksa insiden melalui tim keamanan.", "text/plain")})
+                         files={"file": ("citation-score.txt", "Laporkan insiden kepada tim keamanan.", "text/plain")})
     assert upload.status_code == 200, upload.text
     try:
         response = client.post("/api/v1/query", headers=HEADERS,
