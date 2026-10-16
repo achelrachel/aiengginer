@@ -1,8 +1,8 @@
 """
 DocMind — KnowledgeBase QA API.
 
-Production-like demo: RAG pipeline with hybrid retrieval,
-structured LLM output, observability, security controls.
+Document question-answering API with hybrid retrieval,
+structured LLM output, citation verification, and security controls.
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ app = FastAPI(
     title="DocMind",
     description=(
         "KnowledgeBase QA dengan RAG, structured output, dan retrieval observability. "
-        "Portfolio project — production-like demo."
+        "A source-grounded document question-answering API for a single knowledge base."
     ),
     version="1.0.0",
     lifespan=lifespan,
