@@ -266,3 +266,23 @@ def test_unreadable_upload_magic_does_not_expose_storage_path(tmp_path, monkeypa
     assert not valid
     assert "private-client-name" not in reason
     assert "could not be read" in reason
+
+
+def test_query_provider_failure_is_not_a_successful_refusal(monkeypatch):
+    """A failed provider must result in HTTP 503, not a fake 200 refusal."""
+    from docmind.api import routes
+    from docmind.services.query import LLMServiceUnavailable
+
+    async def broken_provider(**_kwargs):
+        raise LLMServiceUnavailable("secret upstream provider detail")
+
+    monkeypatch.setattr(routes.query_service, "query", broken_provider)
+    with TestClient(app) as client:
+        result = client.post(
+            "/api/v1/query",
+            headers={"Authorization": "Bearer test-only-key"},
+            json={"query": "Apa isi dokumen tersebut?"},
+        )
+    assert result.status_code == 503
+    assert result.json() == {"detail": "Inference provider unavailable"}
+    assert "secret upstream provider detail" not in result.text
