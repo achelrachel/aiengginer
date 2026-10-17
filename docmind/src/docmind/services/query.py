@@ -33,6 +33,11 @@ from docmind.vectorstore.client import get_vector_store
 logger = get_logger("docmind.services.query")
 
 
+class LLMServiceUnavailable(RuntimeError):
+    """Upstream inference could not produce an answer; never represent it as a refusal."""
+
+
+
 class QueryService:
     """Service for processing user queries with RAG."""
 
@@ -161,37 +166,25 @@ class QueryService:
             }
 
         # Step 8: LLM generation
-        llm_client = get_llm_client()
         messages = build_messages(query, context_chunks)
-
         estimated_tokens = estimate_prompt_tokens(query, context_chunks)
-        logger.info(
-            "llm_request",
-            estimated_input_tokens=estimated_tokens,
-            model=llm_client.model,
-        )
-
         try:
+            # Provider initialization can also fail (missing key, model, or
+            # local runtime); it must not be misreported as invalid user input.
+            llm_client = get_llm_client()
+            logger.info(
+                "llm_request",
+                estimated_input_tokens=estimated_tokens,
+                model=llm_client.model,
+            )
             response = await llm_client.chat_completion(
                 messages=messages,
                 response_format=QUERY_ANSWER_SCHEMA,
                 max_tokens=settings.llm_max_tokens,
             )
-        except Exception as e:
-            logger.error("llm_failed", error_type=type(e).__name__)
-            # Return graceful error response
-            return {
-                "answer": "Maaf, terjadi kesalahan saat memproses pertanyaan. Silakan coba lagi.",
-                "answer_status": "refused",
-                "citations": [],
-
-                "retrieval_latency_ms": round((time.monotonic() - t0) * 1000, 2),
-                "llm_latency_ms": None,
-                "total_latency_ms": round((time.monotonic() - t0) * 1000, 2),
-                "input_tokens": None,
-                "output_tokens": None,
-                "estimated_cost_usd": None,
-            }
+        except Exception as exc:
+            logger.error("llm_failed", error_type=type(exc).__name__)
+            raise LLMServiceUnavailable("Inference provider unavailable") from None
 
         metrics.record_stage("llm")
         metrics.input_tokens = response.input_tokens
