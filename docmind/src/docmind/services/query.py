@@ -37,6 +37,10 @@ class LLMServiceUnavailable(RuntimeError):
     """Upstream inference could not produce an answer; never represent it as a refusal."""
 
 
+class LLMResponseInvalid(RuntimeError):
+    """Provider returned a response that does not satisfy the answer schema."""
+
+
 
 class QueryService:
     """Service for processing user queries with RAG."""
@@ -190,25 +194,25 @@ class QueryService:
         metrics.input_tokens = response.input_tokens
         metrics.output_tokens = response.output_tokens
 
-        # Step 9: Parse structured output
+        # Step 9: Parse structured output. A provider formatting failure is
+        # not a genuine model refusal: do not return fake HTTP 200 success.
         try:
             parsed = QueryAnswer.model_validate_json(response.content)
-        except Exception as e:
-            logger.error("parse_failed", error_type=type(e).__name__, response_length=len(response.content))
-            # Fallback: try to extract JSON from response
+        except Exception:
+            # Some local providers wrap valid JSON in one Markdown fence.
+            # Accept only a complete fence, not arbitrary embedded text.
+            candidate = response.content.strip()
+            if candidate.startswith("```json") and candidate.endswith("```"):
+                candidate = candidate[len("```json"):-3].strip()
+            elif candidate.startswith("```") and candidate.endswith("```"):
+                candidate = candidate[3:-3].strip()
+            else:
+                candidate = ""
             try:
-                json_str = response.content
-                if "```" in json_str:
-                    json_str = json_str.split("```")[1].split("json")[1] if "```json" in json_str else json_str.split("```")[1]
-                parsed = QueryAnswer.model_validate_json(json_str)
+                parsed = QueryAnswer.model_validate_json(candidate)
             except Exception:
-                logger.error("fallback_parse_failed")
-                parsed = QueryAnswer(
-                    answer="Maaf, saya tidak dapat memproses jawaban dengan format yang benar.",
-                    answer_status="refused",
-                    citations=[],
-                    thought="Gagal memparse output LLM",
-                )
+                logger.error("llm_schema_invalid", response_length=len(response.content))
+                raise LLMResponseInvalid("Inference response invalid") from None
 
         metrics.record_stage("parse")
 
