@@ -14,7 +14,7 @@ from docmind.models.ingestion import DocumentDeleteResponse, DocumentListRespons
 from docmind.models.query import HealthResponse, QueryRequest, QueryResponse
 from docmind.rate_limit import limiter
 from docmind.services.ingestion import IngestionService
-from docmind.services.query import QueryService, LLMServiceUnavailable
+from docmind.services.query import QueryService, LLMServiceUnavailable, LLMResponseInvalid
 from docmind.config import settings
 from docmind.logging_config import get_logger
 from docmind.observability.request_id import generate_request_id, bind_request_context
@@ -157,6 +157,7 @@ async def delete_document(
     responses={
         401: {"model": None},
         429: {"model": None},
+        502: {"model": None},
         503: {"model": None},
     },
 )
@@ -186,6 +187,9 @@ async def query_knowledge_base(
             metrics=metrics,
         )
         return result
+    except LLMResponseInvalid:
+        logger.warning("query_provider_response_invalid")
+        raise HTTPException(status_code=502, detail="Inference returned an invalid response")
     except LLMServiceUnavailable:
         logger.warning("query_provider_unavailable")
         raise HTTPException(status_code=503, detail="Inference provider unavailable")
