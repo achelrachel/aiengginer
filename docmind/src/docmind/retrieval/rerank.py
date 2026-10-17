@@ -66,7 +66,11 @@ async def rerank_results(
                 continue
             if query_norm > 0 and chunk_norm > 0:
                 dot = sum(a * b for a, b in zip(query_embedding, chunk_embedding))
-                similarity = dot / (query_norm * chunk_norm)
+                cosine = dot / (query_norm * chunk_norm)
+                # Cosine lives in [-1, 1] while the evidence API requires
+                # similarity_score in [0, 1]. Normalize instead of making
+                # valid negatively correlated sources fail citation checks.
+                similarity = max(0.0, min(1.0, (cosine + 1.0) / 2.0))
             else:
                 similarity = 0.0
         else:
