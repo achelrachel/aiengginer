@@ -399,3 +399,28 @@ def test_citation_similarity_is_measured_not_llm_invented(client):
         assert 0.0 < citation["similarity_score"] < 1.0
     finally:
         client.delete(f"/api/v1/documents/{upload.json()['id']}", headers=HEADERS)
+
+
+@pytest.mark.parametrize("provider_content", [
+    "not a JSON response, private upstream payload",
+    '{"answer": "message missing required fields"}',
+])
+def test_malformed_llm_schema_is_upstream_error_not_fake_refusal(client, monkeypatch, provider_content):
+    class MalformedLLM:
+        model = "test-double"
+        async def chat_completion(self, **kwargs):
+            return LLMResponse(provider_content, latency_ms=1.5)
+
+    monkeypatch.setattr(query_module, "get_llm_client", lambda: MalformedLLM())
+    uploaded = client.post("/api/v1/documents/upload", headers=HEADERS,
+                           files={"file": ("malformed-llm-source.txt",
+                                          "Confirmed incident reporting policy with required context.",
+                                          "text/plain")})
+    assert uploaded.status_code == 200, uploaded.text
+    try:
+        answer = client.post("/api/v1/query", headers=HEADERS, json={"query": "incident reporting policy"})
+        assert answer.status_code == 502
+        assert answer.json() == {"detail": "Inference returned an invalid response"}
+        assert provider_content not in answer.text
+    finally:
+        client.delete("/api/v1/documents/" + uploaded.json()["id"], headers=HEADERS)
